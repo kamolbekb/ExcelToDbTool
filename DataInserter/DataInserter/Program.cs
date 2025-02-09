@@ -2,6 +2,7 @@
 using Npgsql;
 using DataInserter;
 
+namespace DataInserter;
 class Program
 {
     static void Main()
