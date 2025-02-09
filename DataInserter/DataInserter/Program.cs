@@ -135,10 +135,11 @@ class Program
                             }
                         }
 
+                        int? sectionId = null;
+
                         if (user.Section != null && user.Section != "")
                         {
                             string checkSectionQuery = "SELECT \"Id\" FROM \"Sections\" WHERE \"Name\" = @Name";
-                            int? sectionId = null;
 
                             using (var checkSecCmd = new NpgsqlCommand(checkSectionQuery, conn2, transaction2))
                             {
@@ -166,7 +167,7 @@ class Program
                             {
                                 string checkSectionDivQuery =
                                     "SELECT COUNT(*) FROM \"SectionDivisions\" WHERE \"SectionId\" = @SectionId AND \"DivisionId\" = @DivisionId";
-                                
+
                                 using (var checkSecDivCmd =
                                        new NpgsqlCommand(checkSectionDivQuery, conn2, transaction2))
                                 {
@@ -247,7 +248,7 @@ class Program
                         {
                             string checkRoleUserGroupQuery =
                                 "SELECT COUNT(*) FROM \"RoleUserGroups\" WHERE \"RoleId\" = @RoleId AND \"UserGroupId\" = @UserGroupId";
-                            
+
                             using (var checkRoleUserGroupCmd =
                                    new NpgsqlCommand(checkRoleUserGroupQuery, conn2, transaction2))
                             {
@@ -281,7 +282,7 @@ class Program
                                     ""ActorLevel"" = EXCLUDED.""ActorLevel""
                                 RETURNING ""Id"";";
 
-                        // int? sdgUserId = null;
+                        int? sdgUserId = null;
 
                         using (var upsertUserCmd = new NpgsqlCommand(upsertUserQuery, conn2, transaction2))
                         {
@@ -289,11 +290,69 @@ class Program
                             upsertUserCmd.Parameters.AddWithValue("@ControlLevel", (int)user.ControlLevel);
                             upsertUserCmd.Parameters.AddWithValue("@IsTerminated", false);
                             upsertUserCmd.Parameters.AddWithValue("@ActorLevel", 1);
-                            upsertUserCmd.Parameters.AddWithValue("@IsApiAdmin", 
-                                (user.Devision == "ADMINISTRTOR" || user.Devision == "ALL"));    //Here should be changed to ADMINISTRATOR
+                            upsertUserCmd.Parameters.AddWithValue("@IsApiAdmin",
+                                (user.Devision == "ADMINISTRTOR" ||
+                                 user.Devision == "ALL")); //Here should be changed to ADMINISTRATOR
 
-                            Convert.ToInt32(upsertUserCmd.ExecuteScalar());
+                            sdgUserId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
                             Console.WriteLine("User upserted in DB2.");
+                        }
+
+                        if (sdgUserId.HasValue && divisionId.HasValue)
+                        {
+                            string checkUserDivQuery =
+                                "SELECT COUNT(*) FROM \"UserDivisions\" WHERE \"UserId\" = @UserId AND \"DivisionId\" = @DivisionId";
+
+                            using (var checkSecDivCmd =
+                                   new NpgsqlCommand(checkUserDivQuery, conn2, transaction2))
+                            {
+                                checkSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
+                                checkSecDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
+                                long secDivCount = Convert.ToInt64(checkSecDivCmd.ExecuteScalar() ?? 0);
+
+                                if (secDivCount == 0)
+                                {
+                                    string insertUserDivQuery =
+                                        "INSERT INTO \"UserDivisions\" (\"UserId\", \"DivisionId\") VALUES (@UserId, @DivisionId)";
+                                    using (var insertUserDivCmd =
+                                           new NpgsqlCommand(insertUserDivQuery, conn2, transaction2))
+                                    {
+                                        insertUserDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
+                                        insertUserDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
+                                        insertUserDivCmd.ExecuteNonQuery();
+                                        Console.WriteLine("User-Division relationship inserted in DB2.");
+                                    }
+                                }
+                            }
+                        }
+
+
+                        if (sectionId.HasValue && sdgUserId.HasValue)
+                        {
+                            string checkSectionDivQuery =
+                                "SELECT COUNT(*) FROM \"UserSections\" WHERE \"SectionId\" = @SectionId AND \"UserId\" = @UserId";
+
+                            using (var checkSecDivCmd =
+                                   new NpgsqlCommand(checkSectionDivQuery, conn2, transaction2))
+                            {
+                                checkSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
+                                checkSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
+                                long secDivCount = Convert.ToInt64(checkSecDivCmd.ExecuteScalar() ?? 0);
+
+                                if (secDivCount == 0)
+                                {
+                                    string insertSectionDivQuery =
+                                        "INSERT INTO \"UserSections\" (\"SectionId\", \"UserId\") VALUES (@SectionId, @UserId)";
+                                    using (var insertSecDivCmd =
+                                           new NpgsqlCommand(insertSectionDivQuery, conn2, transaction2))
+                                    {
+                                        insertSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
+                                        insertSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
+                                        insertSecDivCmd.ExecuteNonQuery();
+                                        Console.WriteLine("User-Section relationship inserted in DB2.");
+                                    }
+                                }
+                            }
                         }
                         
                         string upsertSubject = @"
@@ -309,15 +368,15 @@ class Program
                             upsertUserCmd.Parameters.AddWithValue("@Sub", aspNetUserId);
                             upsertUserCmd.Parameters.AddWithValue("@Name", aspNetUserId);
 
-                            subjectId= Convert.ToInt32(upsertUserCmd.ExecuteScalar());
+                            subjectId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
                             Console.WriteLine("Subjects upserted in DB2.");
                         }
-                        
+
                         if (subjectId.HasValue && userGroupId.HasValue)
                         {
                             string checkRoleUserGroupQuery =
                                 "SELECT COUNT(*) FROM \"SubjectUserGroups\" WHERE \"UserGroupId\" = @UserGroupId AND \"SubjectId\" = @SubjectId";
-                            
+
                             using (var checkRoleUserGroupCmd =
                                    new NpgsqlCommand(checkRoleUserGroupQuery, conn2, transaction2))
                             {
@@ -329,7 +388,7 @@ class Program
                                 {
                                     string insertSubjectUserGroupQuery =
                                         "INSERT INTO \"SubjectUserGroups\" (\"UserGroupId\",\"SubjectId\") VALUES (@UserGroupId,@SubjectId)";
-                                    
+
                                     using (var insertSubjectUserGroupCmd =
                                            new NpgsqlCommand(insertSubjectUserGroupQuery, conn2, transaction2))
                                     {
@@ -345,7 +404,8 @@ class Program
                         transaction1.Commit();
                         transaction2.Commit();
 
-                        Console.WriteLine($"\nUser: {user.Name} Inserted Successfully.\n--------------------------------------");
+                        Console.WriteLine(
+                            $"\nUser: {user.Name} Inserted Successfully.\n--------------------------------------");
                     }
                     catch (Exception ex)
                     {
