@@ -1,23 +1,24 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Npgsql;
-using DataInserter;
+using System.Text.RegularExpressions;
 
 namespace DataInserter;
+
 class Program
 {
     static void Main()
     {
         var builder = new ConfigurationBuilder();
-        
+
         string applicationDirectory = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..");
-        
-        builder.SetBasePath(applicationDirectory) 
+
+        builder.SetBasePath(applicationDirectory)
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
         IConfigurationRoot configuration = builder.Build();
 
         string IAMConnectionString = configuration.GetConnectionString("IAMConnection");
         string SDGConnectionString = configuration.GetConnectionString("SDGConnection");
-        
+
         string excelFilePath = configuration.GetSection("ExcelPath").Value;
 
         if (string.IsNullOrWhiteSpace(excelFilePath) || !File.Exists(excelFilePath))
@@ -53,59 +54,50 @@ class Program
                     {
                         Console.WriteLine($"\nProcessing row {i + 1}: {user.Email}\n");
 
-                        string checkUserQuery = "SELECT COUNT (*) FROM \"AspNetUsers\" WHERE \"Email\" = @Email";
+                        string upsertAspNetUserQuery = @"
+                            INSERT INTO ""AspNetUsers"" (
+                                ""Id"", ""UserName"", ""NormalizedUserName"", ""Email"", ""NormalizedEmail"", ""PasswordHash"", 
+                                ""SecurityStamp"", ""ConcurrencyStamp"", ""Status"", ""UserType"", ""EmailConfirmed"", ""PhoneNumberConfirmed"", 
+                                ""TwoFactorEnabled"", ""LockoutEnabled"", ""AccessFailedCount"", ""IsFromActiveDirectory""
+                                ) VALUES (
+                                    @Id, @UserName, @NormalizedUserName, @Email, @NormalizedEmail, @PasswordHash, 
+                                    @SecurityStamp, @ConcurrencyStamp, @Status, @UserType, @EmailConfirmed, @PhoneNumberConfirmed, 
+                                    @TwoFactorEnabled, @LockoutEnabled, @AccessFailedCount, @IsFromActiveDirectory
+                                    )
+                            ON CONFLICT (""NormalizedUserName"") DO UPDATE SET 
+                                ""Email"" = EXCLUDED.""Email"", 
+                                ""NormalizedEmail"" = EXCLUDED.""NormalizedEmail"", 
+                                ""PasswordHash"" = EXCLUDED.""PasswordHash"", 
+                                ""SecurityStamp"" = EXCLUDED.""SecurityStamp"", 
+                                ""ConcurrencyStamp"" = EXCLUDED.""ConcurrencyStamp"" 
+                            RETURNING ""Id"";";
 
-                        using (var checkCmd = new NpgsqlCommand(checkUserQuery, conn1, transaction1))
+                        using (var upsertCmd = new NpgsqlCommand(upsertAspNetUserQuery, conn1, transaction1))
                         {
-                            checkCmd.Parameters.AddWithValue("@Email", user.Email);
-                            long userCount = Convert.ToInt64(checkCmd.ExecuteScalar() ?? 0);
+                            Guid userId = Guid.NewGuid();
+                            upsertCmd.Parameters.AddWithValue("Id", userId);
+                            upsertCmd.Parameters.AddWithValue("UserName", user.Name);
+                            upsertCmd.Parameters.AddWithValue("NormalizedUserName", user.Name.ToUpper());
+                            upsertCmd.Parameters.AddWithValue("Email", user.Email);
+                            upsertCmd.Parameters.AddWithValue("NormalizedEmail", user.Email.ToUpper());
+                            upsertCmd.Parameters.AddWithValue("PasswordHash",
+                                "AQAAAAEAACcQAAAAEOJCQJY7OZprpkHjF3TQhjR4SfebNHcCm5BCmFn3YHH2/LmC4xCX93CgxOpx4miA1A==");
+                            upsertCmd.Parameters.AddWithValue("SecurityStamp", "TPSRJJCTKHPAOV2GR3HPYS3JR5CFCD5F");
+                            upsertCmd.Parameters.AddWithValue("ConcurrencyStamp",
+                                "448ad65c-f17e-4eab-b236-1acb563d3e14");
+                            upsertCmd.Parameters.AddWithValue("Status", 0);
+                            upsertCmd.Parameters.AddWithValue("UserType", 0);
+                            upsertCmd.Parameters.AddWithValue("EmailConfirmed", true);
+                            upsertCmd.Parameters.AddWithValue("PhoneNumberConfirmed", false);
+                            upsertCmd.Parameters.AddWithValue("TwoFactorEnabled", false);
+                            upsertCmd.Parameters.AddWithValue("LockoutEnabled", true);
+                            upsertCmd.Parameters.AddWithValue("AccessFailedCount", 0);
+                            upsertCmd.Parameters.AddWithValue("IsFromActiveDirectory", false);
 
-                            if (userCount == 0)
-                            {
-                                string insertUserQuery =
-                                    "INSERT INTO \"AspNetUsers\" (\"Id\",\"UserName\", \"NormalizedUserName\", \"Email\"," +
-                                    "\"NormalizedEmail\",\"PasswordHash\",\"SecurityStamp\",\"ConcurrencyStamp\",\"Status\",\"UserType\",\"EmailConfirmed\"," +
-                                    "\"PhoneNumberConfirmed\",\"TwoFactorEnabled\",\"LockoutEnabled\",\"AccessFailedCount\",\"IsFromActiveDirectory\")" +
-                                    "VALUES (@Id,@UserName, @NormalizedUserName, @Email, @NormalizedEmail,@PasswordHash,@SecurityStamp,@ConcurrencyStamp" +
-                                    "@Status,@UserType,@EmailConfirmed,@PhoneNumberConfirmed,@TwoFactorEnabled,@LockoutEnabled,@AccessFailedCount,@IsFromActiveDirectory)";
-
-                                using (var insertCmd = new NpgsqlCommand(insertUserQuery, conn1, transaction1))
-                                {
-                                    insertCmd.Parameters.AddWithValue("Id", Guid.NewGuid());
-                                    insertCmd.Parameters.AddWithValue("UserName", user.Name);
-                                    insertCmd.Parameters.AddWithValue("NormalizedUserName", user.Name.ToUpper());
-                                    insertCmd.Parameters.AddWithValue("Email", user.Email);
-                                    insertCmd.Parameters.AddWithValue("NormalizedEmail", user.Email.ToUpper());
-                                    insertCmd.Parameters.AddWithValue("PasswordHash", "AQAAAAEAACcQAAAAEOJCQJY7OZprpkHjF3TQhjR4SfebNHcCm5BCmFn3YHH2/LmC4xCX93CgxOpx4miA1A==");
-                                    insertCmd.Parameters.AddWithValue("SecurityStamp", "TPSRJJCTKHPAOV2GR3HPYS3JR5CFCD5F");
-                                    insertCmd.Parameters.AddWithValue("ConcurrencyStamp", "448ad65c-f17e-4eab-b236-1acb563d3e14");
-
-                                    insertCmd.Parameters.AddWithValue("Status", 0);
-                                    insertCmd.Parameters.AddWithValue("UserType", 0);
-                                    insertCmd.Parameters.AddWithValue("EmailConfirmed", true);
-                                    insertCmd.Parameters.AddWithValue("PhoneNumberConfirmed", false);
-                                    insertCmd.Parameters.AddWithValue("TwoFactorEnabled", false);
-                                    insertCmd.Parameters.AddWithValue("LockoutEnabled", true);
-                                    insertCmd.Parameters.AddWithValue("AccessFailedCount", 0);
-                                    insertCmd.Parameters.AddWithValue("IsFromActiveDirectory", false);
-                                    insertCmd.ExecuteNonQuery();
-                                    Console.WriteLine("User created in IAMDB.");
-                                }
-                            }
-
-                            string getExistingUser = "SELECT \"Id\" FROM \"AspNetUsers\" WHERE \"Email\" = @Email";
-
-                            using (var cmd = new NpgsqlCommand(getExistingUser, conn1, transaction1))
-                            {
-                                cmd.Parameters.AddWithValue("@Email", user.Email);
-
-                                using (var reader = cmd.ExecuteReader())
-                                {
-                                    reader.Read();
-                                    aspNetUserId = reader.GetGuid(0);
-                                }
-                            }
+                            aspNetUserId = (Guid)upsertCmd.ExecuteScalar();
+                            Console.WriteLine("User upserted in IAMDB.");
                         }
+
 
                         string checkDivisionQuery = "SELECT \"Id\" FROM \"Divisions\" WHERE \"Name\" = @Name";
                         int? divisionId = null;
@@ -190,56 +182,92 @@ class Program
                             }
                         }
 
-
-                        string checkRoleQuery = "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\" = @Name";
+                        string checkRoleQuery = "SELECT \"Id\", \"Name\" FROM \"Roles\"";
+                        var existingRoles = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                         int? roleId = null;
 
                         using (var checkRoleCmd = new NpgsqlCommand(checkRoleQuery, conn2, transaction2))
+                        using (var reader = checkRoleCmd.ExecuteReader())
                         {
-                            checkRoleCmd.Parameters.AddWithValue("@Name", user.Role);
-                            var result = checkRoleCmd.ExecuteScalar();
-                            if (result != null)
-                            {
-                                roleId = Convert.ToInt32(result);
-                            }
-                            else
-                            {
-                                string insertRoleQuery =
-                                    "INSERT INTO \"Roles\" (\"Name\", \"Enabled\", \"ApplicationId\") VALUES (@Name, @Enabled, @ApplicationId) RETURNING \"Id\"";
-                                using (var insertRoleCmd = new NpgsqlCommand(insertRoleQuery, conn2, transaction2))
-                                {
-                                    insertRoleCmd.Parameters.AddWithValue("@Name", user.Role);
-                                    insertRoleCmd.Parameters.AddWithValue("@Enabled", true);
-                                    insertRoleCmd.Parameters.AddWithValue("@ApplicationId", 1);
-                                    roleId = Convert.ToInt32(insertRoleCmd.ExecuteScalar());
-                                    Console.WriteLine("Role inserted in SDGDB.");
-                                }
-                            }
+                            while (reader.Read())
+                                existingRoles[reader.GetString(1).Trim().ToLower()] = reader.GetInt32(0);
                         }
 
-                        string checkUserGroupQuery = "SELECT \"Id\" FROM \"UserGroups\" WHERE \"Name\" = @Name";
+                        var roleTemplates = new List<string> { "Data Provider", "Data Approver", "Administrator" };
+
+                        string normalizedRole = user.Role.Trim();
+
+                        string matchedRole = roleTemplates
+                                                 .FirstOrDefault(template => Regex.IsMatch(normalizedRole,
+                                                     $@"\b{template.Split(' ').Last()}\b", RegexOptions.IgnoreCase))
+                                             ?? normalizedRole;
+
+                        if (Regex.IsMatch(normalizedRole, @"\d+$"))
+                            matchedRole += " " + Regex.Match(normalizedRole, @"\d+$").Value;
+
+                        if (existingRoles.TryGetValue(matchedRole.ToLower(), out int existingRoleId))
+                        {
+                            roleId = existingRoleId;
+                            Console.WriteLine($"Role '{matchedRole}' exists in SDGDB.");
+                        }
+                        else
+                        {
+                            string insertRoleQuery =
+                                "INSERT INTO \"Roles\" (\"Name\", \"Enabled\", \"ApplicationId\") VALUES (@Name, @Enabled, @ApplicationId) RETURNING \"Id\"";
+                            using (var insertRoleCmd = new NpgsqlCommand(insertRoleQuery, conn2, transaction2))
+                            {
+                                insertRoleCmd.Parameters.AddWithValue("@Name", matchedRole);
+                                insertRoleCmd.Parameters.AddWithValue("@Enabled", true);
+                                insertRoleCmd.Parameters.AddWithValue("@ApplicationId", 1);
+                                roleId = Convert.ToInt32(insertRoleCmd.ExecuteScalar());
+                            }
+
+                            Console.WriteLine($"Role '{matchedRole}' inserted in SDGDB.");
+                        }
+
+
+                        string checkUserGroupQuery = "SELECT \"Id\", \"Name\" FROM \"UserGroups\"";
+                        var existingUserGroups = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                         int? userGroupId = null;
 
                         using (var checkUserGroupCmd = new NpgsqlCommand(checkUserGroupQuery, conn2, transaction2))
+                        using (var reader = checkUserGroupCmd.ExecuteReader())
                         {
-                            checkUserGroupCmd.Parameters.AddWithValue("@Name", user.UserGroup);
-                            var result = checkUserGroupCmd.ExecuteScalar();
-                            if (result != null)
+                            while (reader.Read())
+                                existingUserGroups[reader.GetString(1).Trim().ToLower()] = reader.GetInt32(0);
+                        }
+
+                        var userGroupTemplates = new List<string>
+                            { "Data Approver Group", "Data Provider Group", "Admin Group" };
+
+                        string normalizedUserGroup = user.UserGroup.Trim();
+
+                        string matchedUserGroup = userGroupTemplates
+                                                      .FirstOrDefault(template => Regex.IsMatch(normalizedUserGroup,
+                                                          $@"\b{template.Split(' ').ElementAt(1)}\b",
+                                                          RegexOptions.IgnoreCase))
+                                                  ?? normalizedUserGroup;
+
+                        if (Regex.IsMatch(normalizedUserGroup, @"\d+$"))
+                            matchedUserGroup += " " + Regex.Match(normalizedUserGroup, @"\d+$").Value;
+
+                        if (existingUserGroups.TryGetValue(matchedUserGroup.ToLower(), out int existingUserGroupId))
+                        {
+                            userGroupId = existingUserGroupId;
+                            Console.WriteLine($"UserGroup '{matchedUserGroup}' exists in SDGDB.");
+                        }
+                        else
+                        {
+                            string insertUserGroupQuery =
+                                "INSERT INTO \"UserGroups\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
+                            using (var insertUserGroupCmd =
+                                   new NpgsqlCommand(insertUserGroupQuery, conn2, transaction2))
                             {
-                                userGroupId = Convert.ToInt32(result);
+                                insertUserGroupCmd.Parameters.AddWithValue("@Name", matchedUserGroup);
+                                userGroupId = Convert.ToInt32(insertUserGroupCmd.ExecuteScalar());
                             }
-                            else
-                            {
-                                string insertUserGroupQuery =
-                                    "INSERT INTO \"UserGroups\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
-                                using (var insertUserGroupCmd =
-                                       new NpgsqlCommand(insertUserGroupQuery, conn2, transaction2))
-                                {
-                                    insertUserGroupCmd.Parameters.AddWithValue("@Name", user.UserGroup);
-                                    userGroupId = Convert.ToInt32(insertUserGroupCmd.ExecuteScalar());
-                                    Console.WriteLine("UserGroup inserted in SDGDB.");
-                                }
-                            }
+
+                            Console.WriteLine($"UserGroup '{matchedUserGroup}' inserted in SDGDB.");
                         }
 
                         if (roleId.HasValue && userGroupId.HasValue)
@@ -289,7 +317,7 @@ class Program
                             upsertUserCmd.Parameters.AddWithValue("@IsTerminated", false);
                             upsertUserCmd.Parameters.AddWithValue("@ActorLevel", 1);
                             upsertUserCmd.Parameters.AddWithValue("@IsApiAdmin",
-                                (user.Devision == "ADMINISTRTOR" ||
+                                (user.Devision == "ADMINISTRATOR" ||
                                  user.Devision == "ALL")); //Here should be changed to ADMINISTRATOR
 
                             sdgUserId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
@@ -352,7 +380,7 @@ class Program
                                 }
                             }
                         }
-                        
+
                         string upsertSubject = @"
                                 INSERT INTO ""Subjects"" (""Sub"", ""Name"") 
                                 VALUES (@Sub, @Name)
@@ -408,7 +436,8 @@ class Program
                     catch (Exception ex)
                     {
                         Console.WriteLine($"Error processing Excel row {user.ExcelRow}: {ex.Message}");
-                        Console.WriteLine($"Rolling back the current {user.ExcelRow}st Excel row and skipping to the next...");
+                        Console.WriteLine(
+                            $"Rolling back the current {user.ExcelRow}st Excel row and skipping to the next...");
 
                         transaction1.Rollback();
                         transaction2.Rollback();
