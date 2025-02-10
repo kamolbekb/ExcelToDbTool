@@ -5,6 +5,6 @@ public enum ControlLevel
     NONE,
     APPLICATION,
     ORGANIZATION,
-    DEVISON,
+    DEVISION,
     SECTION
 }
