@@ -41,11 +41,21 @@ class Program
             conn1.Open();
             conn2.Open();
             Console.WriteLine("Connected to both databases.");
+            
+            Guid aspNetUserId;
+            int? agencyId = null;
+            
+            string getDefaultAgency = "SELECT \"Id\" FROM \"Agencies\" ORDER BY \"Id\" LIMIT 1";
+
+            using (var getAgencyCmd = new NpgsqlCommand(getDefaultAgency, conn2))
+            {
+                var result = getAgencyCmd.ExecuteScalar();
+                agencyId = result != null ? Convert.ToInt32(result) : null;
+            }
 
             for (int i = 0; i < users.Count; i++)
             {
                 var user = users[i];
-                Guid aspNetUserId;
 
                 using (var transaction1 = conn1.BeginTransaction())
                 using (var transaction2 = conn2.BeginTransaction())
@@ -97,8 +107,7 @@ class Program
                             aspNetUserId = (Guid)upsertCmd.ExecuteScalar();
                             Console.WriteLine("User upserted in IAMDB.");
                         }
-
-
+                        
                         string checkDivisionQuery = "SELECT \"Id\" FROM \"Divisions\" WHERE \"Name\" = @Name";
                         int? divisionId = null;
 
@@ -352,7 +361,35 @@ class Program
                             }
                         }
 
+                        if (sdgUserId.HasValue && agencyId.HasValue)
+                        {
+                            string checkUserAgencyQuery =
+                                "SELECT COUNT(*) FROM \"UserAgencies\" WHERE \"UserId\" = @UserId AND \"AgencyId\" = @AgencyId";
 
+                            using (var checkUserAgencyCmd =
+                                   new NpgsqlCommand(checkUserAgencyQuery, conn2, transaction2))
+                            {
+                                checkUserAgencyCmd.Parameters.AddWithValue("@UserId", sdgUserId);
+                                checkUserAgencyCmd.Parameters.AddWithValue("@AgencyId", agencyId);
+                                long secDivCount = Convert.ToInt64(checkUserAgencyCmd.ExecuteScalar() ?? 0);
+
+                                if (secDivCount == 0)
+                                {
+                                    string insertUserAgencyQuery =
+                                        "INSERT INTO \"UserAgencies\" (\"UserId\", \"AgencyId\") VALUES (@UserId, @AgencyId)";
+                                    
+                                    using (var insertUserAgencyCmd =
+                                           new NpgsqlCommand(insertUserAgencyQuery, conn2, transaction2))
+                                    {
+                                        insertUserAgencyCmd.Parameters.AddWithValue("@UserId", sdgUserId);
+                                        insertUserAgencyCmd.Parameters.AddWithValue("@AgencyId", agencyId);
+                                        insertUserAgencyCmd.ExecuteNonQuery();
+                                        Console.WriteLine("User-Agency relationship inserted in SDGDB.");
+                                    }
+                                }
+                            }
+                        }
+                        
                         if (sectionId.HasValue && sdgUserId.HasValue)
                         {
                             string checkSectionDivQuery =
