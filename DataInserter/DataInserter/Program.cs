@@ -7,23 +7,18 @@ class Program
 {
     static void Main()
     {
-        var location = System.Environment.CurrentDirectory;
-        var realPath =
-            location.Replace(
-                $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}Debug{Path.DirectorySeparatorChar}net8.0",
-                "");
-
-        var builder = new ConfigurationBuilder()
-            .SetBasePath(realPath)
+        var builder = new ConfigurationBuilder();
+        
+        string applicationDirectory = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..");
+        
+        builder.SetBasePath(applicationDirectory) 
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-        IConfiguration config = builder.Build();
+        IConfigurationRoot configuration = builder.Build();
 
-        string IAMConnectionString = config.GetConnectionString("IAMConnection");
-        string SDGConnectionString = config.GetConnectionString("SDGConnection");
-
-        // Get Excel file path from console input
-        Console.Write("Enter the full path to the Excel file: ");
-        string excelFilePath = Console.ReadLine()?.Trim();
+        string IAMConnectionString = configuration.GetConnectionString("IAMConnection");
+        string SDGConnectionString = configuration.GetConnectionString("SDGConnection");
+        
+        string excelFilePath = configuration.GetSection("ExcelPath").Value;
 
         if (string.IsNullOrWhiteSpace(excelFilePath) || !File.Exists(excelFilePath))
         {
@@ -69,9 +64,9 @@ class Program
                             {
                                 string insertUserQuery =
                                     "INSERT INTO \"AspNetUsers\" (\"Id\",\"UserName\", \"NormalizedUserName\", \"Email\"," +
-                                    "\"NormalizedEmail\",\"PasswordHash\",\"Status\",\"UserType\",\"EmailConfirmed\"," +
+                                    "\"NormalizedEmail\",\"PasswordHash\",\"SecurityStamp\",\"ConcurrencyStamp\",\"Status\",\"UserType\",\"EmailConfirmed\"," +
                                     "\"PhoneNumberConfirmed\",\"TwoFactorEnabled\",\"LockoutEnabled\",\"AccessFailedCount\",\"IsFromActiveDirectory\")" +
-                                    "VALUES (@Id,@UserName, @NormalizedUserName, @Email, @NormalizedEmail,@PasswordHash," +
+                                    "VALUES (@Id,@UserName, @NormalizedUserName, @Email, @NormalizedEmail,@PasswordHash,@SecurityStamp,@ConcurrencyStamp" +
                                     "@Status,@UserType,@EmailConfirmed,@PhoneNumberConfirmed,@TwoFactorEnabled,@LockoutEnabled,@AccessFailedCount,@IsFromActiveDirectory)";
 
                                 using (var insertCmd = new NpgsqlCommand(insertUserQuery, conn1, transaction1))
@@ -81,7 +76,9 @@ class Program
                                     insertCmd.Parameters.AddWithValue("NormalizedUserName", user.Name.ToUpper());
                                     insertCmd.Parameters.AddWithValue("Email", user.Email);
                                     insertCmd.Parameters.AddWithValue("NormalizedEmail", user.Email.ToUpper());
-                                    insertCmd.Parameters.AddWithValue("PasswordHash", "nqoO021-i5\\n");
+                                    insertCmd.Parameters.AddWithValue("PasswordHash", "AQAAAAEAACcQAAAAEOJCQJY7OZprpkHjF3TQhjR4SfebNHcCm5BCmFn3YHH2/LmC4xCX93CgxOpx4miA1A==");
+                                    insertCmd.Parameters.AddWithValue("SecurityStamp", "TPSRJJCTKHPAOV2GR3HPYS3JR5CFCD5F");
+                                    insertCmd.Parameters.AddWithValue("ConcurrencyStamp", "448ad65c-f17e-4eab-b236-1acb563d3e14");
 
                                     insertCmd.Parameters.AddWithValue("Status", 0);
                                     insertCmd.Parameters.AddWithValue("UserType", 0);
@@ -92,7 +89,7 @@ class Program
                                     insertCmd.Parameters.AddWithValue("AccessFailedCount", 0);
                                     insertCmd.Parameters.AddWithValue("IsFromActiveDirectory", false);
                                     insertCmd.ExecuteNonQuery();
-                                    Console.WriteLine("User created in DB1.");
+                                    Console.WriteLine("User created in IAMDB.");
                                 }
                             }
 
@@ -131,7 +128,7 @@ class Program
                                 {
                                     insertDivCmd.Parameters.AddWithValue("@Name", user.Devision);
                                     divisionId = Convert.ToInt32(insertDivCmd.ExecuteScalar());
-                                    Console.WriteLine("Division inserted in DB2.");
+                                    Console.WriteLine("Division inserted in SDGDB.");
                                 }
                             }
                         }
@@ -159,7 +156,7 @@ class Program
                                     {
                                         insertSecCmd.Parameters.AddWithValue("@Name", user.Section);
                                         sectionId = Convert.ToInt32(insertSecCmd.ExecuteScalar());
-                                        Console.WriteLine("Section inserted in DB2.");
+                                        Console.WriteLine("Section inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -186,7 +183,7 @@ class Program
                                             insertSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
                                             insertSecDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
                                             insertSecDivCmd.ExecuteNonQuery();
-                                            Console.WriteLine("Section-Division relationship inserted in DB2.");
+                                            Console.WriteLine("Section-Division relationship inserted in SDGDB.");
                                         }
                                     }
                                 }
@@ -215,7 +212,7 @@ class Program
                                     insertRoleCmd.Parameters.AddWithValue("@Enabled", true);
                                     insertRoleCmd.Parameters.AddWithValue("@ApplicationId", 1);
                                     roleId = Convert.ToInt32(insertRoleCmd.ExecuteScalar());
-                                    Console.WriteLine("Role inserted in DB2.");
+                                    Console.WriteLine("Role inserted in SDGDB.");
                                 }
                             }
                         }
@@ -240,7 +237,7 @@ class Program
                                 {
                                     insertUserGroupCmd.Parameters.AddWithValue("@Name", user.UserGroup);
                                     userGroupId = Convert.ToInt32(insertUserGroupCmd.ExecuteScalar());
-                                    Console.WriteLine("UserGroup inserted in DB2.");
+                                    Console.WriteLine("UserGroup inserted in SDGDB.");
                                 }
                             }
                         }
@@ -267,7 +264,7 @@ class Program
                                         insertRoleUserGroupCmd.Parameters.AddWithValue("@RoleId", roleId);
                                         insertRoleUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
                                         insertRoleUserGroupCmd.ExecuteNonQuery();
-                                        Console.WriteLine("Role-UserGroup relationship inserted in DB2.");
+                                        Console.WriteLine("Role-UserGroup relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -296,7 +293,7 @@ class Program
                                  user.Devision == "ALL")); //Here should be changed to ADMINISTRATOR
 
                             sdgUserId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
-                            Console.WriteLine("User upserted in DB2.");
+                            Console.WriteLine("User upserted in SDGDB.");
                         }
 
                         if (sdgUserId.HasValue && divisionId.HasValue)
@@ -321,7 +318,7 @@ class Program
                                         insertUserDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
                                         insertUserDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
                                         insertUserDivCmd.ExecuteNonQuery();
-                                        Console.WriteLine("User-Division relationship inserted in DB2.");
+                                        Console.WriteLine("User-Division relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -350,7 +347,7 @@ class Program
                                         insertSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
                                         insertSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
                                         insertSecDivCmd.ExecuteNonQuery();
-                                        Console.WriteLine("User-Section relationship inserted in DB2.");
+                                        Console.WriteLine("User-Section relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -370,7 +367,7 @@ class Program
                             upsertUserCmd.Parameters.AddWithValue("@Name", aspNetUserId);
 
                             subjectId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
-                            Console.WriteLine("Subjects upserted in DB2.");
+                            Console.WriteLine("Subjects upserted in SDGDB.");
                         }
 
                         if (subjectId.HasValue && userGroupId.HasValue)
@@ -396,7 +393,7 @@ class Program
                                         insertSubjectUserGroupCmd.Parameters.AddWithValue("@SubjectId", subjectId);
                                         insertSubjectUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
                                         insertSubjectUserGroupCmd.ExecuteNonQuery();
-                                        Console.WriteLine("Subject-UserGroup relationship inserted in DB2.");
+                                        Console.WriteLine("Subject-UserGroup relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -410,8 +407,8 @@ class Program
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Error processing row {i + 1}: {ex.Message}");
-                        Console.WriteLine($"Rolling back the current {i + 1}st row and skipping to the next...");
+                        Console.WriteLine($"Error processing Excel row {user.ExcelRow}: {ex.Message}");
+                        Console.WriteLine($"Rolling back the current {user.ExcelRow}st Excel row and skipping to the next...");
 
                         transaction1.Rollback();
                         transaction2.Rollback();
