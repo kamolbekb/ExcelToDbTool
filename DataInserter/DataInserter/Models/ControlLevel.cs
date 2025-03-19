@@ -1,8 +1,8 @@
-namespace DataInserter;
+namespace DataInserter.Models;
 
 public enum ControlLevel
 {
-    NONE=1,
+    NONE = 1,
     APPLICATION,
     ORGANIZATION,
     DEVISION,

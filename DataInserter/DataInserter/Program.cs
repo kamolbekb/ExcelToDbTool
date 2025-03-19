@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using DataInserter.Models;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
 using System.Text.RegularExpressions;
 

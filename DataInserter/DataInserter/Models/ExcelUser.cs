@@ -1,6 +1,6 @@
 using ClosedXML.Excel;
 
-namespace DataInserter;
+namespace DataInserter.Models;
 
 class ExcelUser
 {
@@ -12,8 +12,8 @@ class ExcelUser
     public string Section { get; set; }
     public string Devision { get; set; }
     public ControlLevel ControlLevel { get; set; }
-    
-    
+
+
     public static List<ExcelUser> ReadUsersFromExcel(string filePath)
     {
         var users = new List<ExcelUser>();
@@ -24,7 +24,7 @@ class ExcelUser
             var rows = worksheet.RangeUsed().RowsUsed();
 
             int dataRow = 1;
-            foreach (var row in rows.Skip(2)) 
+            foreach (var row in rows.Skip(2))
             {
                 try
                 {
@@ -37,7 +37,7 @@ class ExcelUser
                         UserGroup = row.Cell(5).GetString().Trim(),
                         Section = row.Cell(6).GetString().Trim(),
                         Devision = row.Cell(7).GetString().Trim(),
-                        ControlLevel = ParseControlLevel("NONE") 
+                        ControlLevel = ParseControlLevel("NONE")
 
                     };
 
@@ -58,7 +58,7 @@ class ExcelUser
 
         return users;
     }
-    
+
     private static ControlLevel ParseControlLevel(string value)
     {
         string formattedValue = value.ToUpper();
