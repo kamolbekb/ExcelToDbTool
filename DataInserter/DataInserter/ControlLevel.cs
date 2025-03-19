@@ -2,7 +2,7 @@ namespace DataInserter;
 
 public enum ControlLevel
 {
-    NONE,
+    NONE=1,
     APPLICATION,
     ORGANIZATION,
     DEVISION,
