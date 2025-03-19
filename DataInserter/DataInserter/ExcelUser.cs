@@ -24,7 +24,7 @@ class ExcelUser
             var rows = worksheet.RangeUsed().RowsUsed();
 
             int dataRow = 1;
-            foreach (var row in rows.Skip(2)) // Skip header row
+            foreach (var row in rows.Skip(2)) 
             {
                 try
                 {
@@ -37,7 +37,7 @@ class ExcelUser
                         UserGroup = row.Cell(5).GetString().Trim(),
                         Section = row.Cell(6).GetString().Trim(),
                         Devision = row.Cell(7).GetString().Trim(),
-                        ControlLevel = ParseControlLevel(row.Cell(8).GetString().Trim())
+                        ControlLevel = ParseControlLevel("NONE") 
 
                     };
 
