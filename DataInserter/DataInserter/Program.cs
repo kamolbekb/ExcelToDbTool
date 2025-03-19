@@ -19,6 +19,8 @@ class Program
         string IAMConnectionString = configuration.GetConnectionString("IAMConnection");
         string SDGConnectionString = configuration.GetConnectionString("SDGConnection");
 
+        var userClaims = configuration.GetSection("UserCommonFields").Get<UserCommonFields>();
+
         string excelFilePath = configuration.GetSection("ExcelPath").Value;
 
         if (string.IsNullOrWhiteSpace(excelFilePath) || !File.Exists(excelFilePath))
@@ -90,11 +92,9 @@ class Program
                             upsertCmd.Parameters.AddWithValue("NormalizedUserName", user.Name.ToUpper());
                             upsertCmd.Parameters.AddWithValue("Email", user.Email);
                             upsertCmd.Parameters.AddWithValue("NormalizedEmail", user.Email.ToUpper());
-                            upsertCmd.Parameters.AddWithValue("PasswordHash",
-                                "AQAAAAEAACcQAAAAEOJCQJY7OZprpkHjF3TQhjR4SfebNHcCm5BCmFn3YHH2/LmC4xCX93CgxOpx4miA1A==");
-                            upsertCmd.Parameters.AddWithValue("SecurityStamp", "TPSRJJCTKHPAOV2GR3HPYS3JR5CFCD5F");
-                            upsertCmd.Parameters.AddWithValue("ConcurrencyStamp",
-                                "448ad65c-f17e-4eab-b236-1acb563d3e14");
+                            upsertCmd.Parameters.AddWithValue("PasswordHash",userClaims.PasswordHash);
+                            upsertCmd.Parameters.AddWithValue("SecurityStamp", userClaims.SecurityStamp);
+                            upsertCmd.Parameters.AddWithValue("ConcurrencyStamp",userClaims.ConcurrencyStamp);
                             upsertCmd.Parameters.AddWithValue("Status", 0);
                             upsertCmd.Parameters.AddWithValue("UserType", 0);
                             upsertCmd.Parameters.AddWithValue("EmailConfirmed", true);
