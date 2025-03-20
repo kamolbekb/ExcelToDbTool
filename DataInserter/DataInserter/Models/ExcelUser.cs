@@ -37,7 +37,7 @@ class ExcelUser
                         UserGroup = row.Cell(5).GetString().Trim(),
                         Section = row.Cell(6).GetString().Trim(),
                         Devision = row.Cell(7).GetString().Trim(),
-                        ControlLevel = ParseControlLevel("NONE")
+                        ControlLevel = ParseControlLevel("SECTION")
 
                     };
 
