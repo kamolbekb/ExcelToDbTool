@@ -33,10 +33,10 @@ class ExcelUser
                         ExcelRow = row.Cell(1).GetValue<int>(),
                         Name = row.Cell(2).GetString().Trim(),
                         Email = row.Cell(3).GetString().Trim(),
-                        Role = row.Cell(4).GetString().Trim(),
-                        UserGroup = row.Cell(5).GetString().Trim(),
-                        Section = row.Cell(6).GetString().Trim(),
-                        Devision = row.Cell(7).GetString().Trim(),
+                        Role = row.Cell(5).GetString().Trim(),
+                        UserGroup = row.Cell(6).GetString().Trim(),
+                        Section = row.Cell(7).GetString().Trim(),
+                        Devision = row.Cell(8).GetString().Trim(),
                         ControlLevel = ParseControlLevel("SECTION")
 
                     };
