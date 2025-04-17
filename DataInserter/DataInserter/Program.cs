@@ -1,7 +1,7 @@
-﻿using DataInserter.Models;
+﻿using System.Text.RegularExpressions;
+using DataInserter.Models;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
-using System.Text.RegularExpressions;
 
 namespace DataInserter;
 
@@ -9,12 +9,14 @@ class Program
 {
     static void Main()
     {
-        var builder = new ConfigurationBuilder();
+        string basePath = AppContext.BaseDirectory;
 
-        string applicationDirectory = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..");
+        Console.WriteLine($"Base Path: {basePath}");
 
-        builder.SetBasePath(applicationDirectory)
+        var builder = new ConfigurationBuilder()
+            .SetBasePath(basePath)
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+
         IConfigurationRoot configuration = builder.Build();
 
         string IAMConnectionString = configuration.GetConnectionString("IAMConnection");
@@ -44,10 +46,10 @@ class Program
             conn1.Open();
             conn2.Open();
             Console.WriteLine("Connected to both databases.");
-            
+
             Guid aspNetUserId;
             int? agencyId = null;
-            
+
             string getDefaultAgency = "SELECT \"Id\" FROM \"Agencies\" ORDER BY \"Id\" LIMIT 1";
 
             using (var getAgencyCmd = new NpgsqlCommand(getDefaultAgency, conn2))
@@ -93,9 +95,9 @@ class Program
                             upsertCmd.Parameters.AddWithValue("NormalizedUserName", user.Name.ToUpper());
                             upsertCmd.Parameters.AddWithValue("Email", user.Email);
                             upsertCmd.Parameters.AddWithValue("NormalizedEmail", user.Email.ToUpper());
-                            upsertCmd.Parameters.AddWithValue("PasswordHash",userClaims.PasswordHash);
+                            upsertCmd.Parameters.AddWithValue("PasswordHash", userClaims.PasswordHash);
                             upsertCmd.Parameters.AddWithValue("SecurityStamp", userClaims.SecurityStamp);
-                            upsertCmd.Parameters.AddWithValue("ConcurrencyStamp",userClaims.ConcurrencyStamp);
+                            upsertCmd.Parameters.AddWithValue("ConcurrencyStamp", userClaims.ConcurrencyStamp);
                             upsertCmd.Parameters.AddWithValue("Status", 0);
                             upsertCmd.Parameters.AddWithValue("UserType", 0);
                             upsertCmd.Parameters.AddWithValue("EmailConfirmed", true);
@@ -108,7 +110,7 @@ class Program
                             aspNetUserId = (Guid)upsertCmd.ExecuteScalar();
                             Console.WriteLine("User upserted in IAMDB.");
                         }
-                        
+
                         string checkDivisionQuery = "SELECT \"Id\" FROM \"Divisions\" WHERE \"Name\" = @Name";
                         int? divisionId = null;
 
@@ -378,7 +380,7 @@ class Program
                                 {
                                     string insertUserAgencyQuery =
                                         "INSERT INTO \"UserAgencies\" (\"UserId\", \"AgencyId\") VALUES (@UserId, @AgencyId)";
-                                    
+
                                     using (var insertUserAgencyCmd =
                                            new NpgsqlCommand(insertUserAgencyQuery, conn2, transaction2))
                                     {
@@ -390,7 +392,7 @@ class Program
                                 }
                             }
                         }
-                        
+
                         if (sectionId.HasValue && sdgUserId.HasValue)
                         {
                             string checkSectionDivQuery =
