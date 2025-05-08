@@ -1,7 +1,7 @@
-﻿using System.Text.RegularExpressions;
-using DataInserter.Models;
+﻿using DataInserter.Models;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
+using System.Text.RegularExpressions;
 
 namespace DataInserter;
 
@@ -40,6 +40,28 @@ class Program
             return;
         }
 
+        string projectRoot = Path.GetFullPath(Path.Combine(basePath, @"..\..\.."));
+        string duplicateRecordsDir = Path.Combine(projectRoot, "DuplicateRecords");
+
+        Directory.CreateDirectory(duplicateRecordsDir);
+
+        string timestamp = DateTime.Now.ToString("dd.MM.yyyy-HH-mm-ss");
+        string duplicateFilePath = Path.Combine(duplicateRecordsDir, $"duplicates_{timestamp}.txt");
+
+        File.Create(duplicateFilePath).Dispose();
+
+        Console.WriteLine($"Duplicate file created at: {duplicateFilePath}");
+
+        string gitignorePath = Path.Combine(basePath, ".gitignore");
+        string relativeIgnorePath = Path.Combine("DuplicateRecords", "duplicates_*.txt");
+
+        if (!File.Exists(gitignorePath) || !File.ReadAllLines(gitignorePath).Any(line => line.Trim() == relativeIgnorePath))
+        {
+            File.AppendAllText(gitignorePath, Environment.NewLine + relativeIgnorePath);
+            Console.WriteLine($".gitignore updated to ignore: {relativeIgnorePath}");
+        }
+
+
         using (var conn1 = new NpgsqlConnection(IAMConnectionString))
         using (var conn2 = new NpgsqlConnection(SDGConnectionString))
         {
@@ -68,6 +90,25 @@ class Program
                     try
                     {
                         Console.WriteLine($"\nProcessing row {i + 1}: {user.Email}\n");
+
+                        string checkExistingUserQuery = "SELECT \"Id\" FROM \"AspNetUsers\" WHERE \"Email\" = @Email";
+                        string? existingUserId = null;
+
+                        using (var checkExistingUserCmd = new NpgsqlCommand(checkExistingUserQuery, conn1, transaction1))
+                        {
+                            checkExistingUserCmd.Parameters.AddWithValue("@Email", user.Email);
+                            var result = checkExistingUserCmd.ExecuteScalar();
+
+                            if (result != null)
+                            {
+                                existingUserId = result.ToString();
+                                string logLine = $"[Row {user.ExcelRow}] Existing user ID: {existingUserId}, Email: {user.Email}{Environment.NewLine}\n";
+                                File.AppendAllText(duplicateFilePath, logLine);
+
+                                Console.WriteLine($"Skipping row {i + 1} because Email: '{user.Email}' is already in use\n");
+                                continue;
+                            }
+                        }
 
                         string upsertAspNetUserQuery = @"
                             INSERT INTO ""AspNetUsers"" (
