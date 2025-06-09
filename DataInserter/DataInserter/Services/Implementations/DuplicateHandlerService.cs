@@ -17,7 +17,8 @@ public class DuplicateHandlerService : IDuplicateHandlerService
     {
         _logger = logger.ForContext<DuplicateHandlerService>();
         var basePath = AppContext.BaseDirectory;
-        _projectRoot = Path.GetFullPath(Path.Combine(basePath, @"..\..\.."));
+        // Use Path.Combine for cross-platform compatibility
+        _projectRoot = Path.GetFullPath(Path.Combine(basePath, "..", "..", ".."));
     }
 
     public async Task InitializeDuplicateFileAsync(CancellationToken cancellationToken = default)

@@ -35,9 +35,9 @@ class Program
             Log.Information("Application starting...");
 
             var host = CreateHostBuilder(args).Build();
-            
+
             await RunApplicationAsync(host);
-            
+
             Log.Information("Application completed successfully");
         }
         catch (Exception ex)
@@ -106,9 +106,9 @@ class Program
                 await foreach (var batch in excelReader.ReadUsersInBatchesAsync(appConfig.ExcelPath, appConfig.BatchSize))
                 {
                     logger.Information("Processing batch of {Count} users", batch.Count);
-                    
+
                     var result = await userProcessor.ProcessUsersBatchAsync(batch);
-                    
+
                     totalProcessed += result.TotalRecords;
                     totalSuccess += result.SuccessfulRecords;
                     totalDuplicates += result.DuplicateRecords;
@@ -122,7 +122,7 @@ class Program
                     {
                         foreach (var error in result.Errors)
                         {
-                            logger.Error("Row {Row} ({Email}): {Error}", 
+                            logger.Error("Row {Row} ({Email}): {Error}",
                                 error.ExcelRow, error.Email, error.ErrorMessage);
                         }
                     }
@@ -131,9 +131,9 @@ class Program
             else
             {
                 logger.Information("Processing all users at once");
-                
+
                 var users = await excelReader.ReadUsersFromExcelAsync(appConfig.ExcelPath);
-                
+
                 if (!users.Any())
                 {
                     logger.Warning("No valid users found in Excel file");
@@ -141,7 +141,7 @@ class Program
                 }
 
                 var result = await userProcessor.ProcessUsersAsync(users);
-                
+
                 totalProcessed = result.TotalRecords;
                 totalSuccess = result.SuccessfulRecords;
                 totalDuplicates = result.DuplicateRecords;
@@ -151,7 +151,7 @@ class Program
                 {
                     foreach (var error in result.Errors)
                     {
-                        logger.Error("Row {Row} ({Email}): {Error}", 
+                        logger.Error("Row {Row} ({Email}): {Error}",
                             error.ExcelRow, error.Email, error.ErrorMessage);
                     }
                 }
@@ -163,7 +163,7 @@ class Program
             logger.Information("=== Processing Summary ===");
             logger.Information("Total Processing Time: {Duration}", overallStopwatch.Elapsed);
             logger.Information("Total Records Processed: {Total}", totalProcessed);
-            logger.Information("Successful: {Success} ({SuccessRate:P2})", 
+            logger.Information("Successful: {Success} ({SuccessRate:P2})",
                 totalSuccess, totalProcessed > 0 ? (double)totalSuccess / totalProcessed : 0);
             logger.Information("Duplicates: {Duplicates}", totalDuplicates);
             logger.Information("Failed: {Failed}", totalFailed);
@@ -184,6 +184,7 @@ class Program
     private static string GetProjectRoot()
     {
         var basePath = AppContext.BaseDirectory;
-        return Path.GetFullPath(Path.Combine(basePath, @"..\..\.."));
+        // Use Path.Combine for cross-platform compatibility
+        return Path.GetFullPath(Path.Combine(basePath, "..", "..", ".."));
     }
 }
