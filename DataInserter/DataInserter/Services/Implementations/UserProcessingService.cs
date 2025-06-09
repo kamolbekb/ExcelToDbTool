@@ -57,10 +57,12 @@ public class UserProcessingService : IUserProcessingService
             TotalRecords = users.Count
         };
 
-        _logger.Information("Starting to process {Count} users", users.Count);
+        _logger.Information("Starting to process users from Excel file...");
+        _logger.Information("Total users to process: {Count}", users.Count);
 
         // Pre-load caches
         await PreloadCachesAsync(cancellationToken);
+        _logger.Information("Connected to both databases.\n");
         
         // Get default agency ID once
         var defaultAgencyId = await _sdgRepository.GetDefaultAgencyIdAsync(cancellationToken);
@@ -68,18 +70,27 @@ public class UserProcessingService : IUserProcessingService
         {
             _logger.Warning("No default agency found in the system");
         }
+        else
+        {
+            _logger.Information("Using default agency ID: {AgencyId}", defaultAgencyId.Value);
+        }
 
         // Check for existing users in batch
         var emails = users.Select(u => u.Email).Distinct().ToList();
         var existingUsers = await _iamRepository.GetExistingUsersAsync(emails, cancellationToken);
 
         // Process users
+        var processedCount = 0;
         foreach (var user in users)
         {
+            processedCount++;
             cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
+                _logger.Information("\nProcessing row {Current}/{Total}: {Email}\n", 
+                    processedCount, users.Count, user.Email);
+                    
                 if (existingUsers.ContainsKey(user.Email))
                 {
                     result.DuplicateRecords++;
@@ -90,14 +101,15 @@ public class UserProcessingService : IUserProcessingService
                         ExistingUserId = existingUsers[user.Email]
                     }, cancellationToken);
                     
-                    _logger.Information("Skipping duplicate user: {Email} (Row {Row})", user.Email, user.ExcelRow);
+                    _logger.Information("Skipping row {Row} because Email: '{Email}' is already in use\n", 
+                        processedCount, user.Email);
                     continue;
                 }
 
                 await ProcessSingleUserAsync(user, defaultAgencyId, cancellationToken);
                 result.SuccessfulRecords++;
                 
-                _logger.Information("Successfully processed user: {Email} (Row {Row})", user.Email, user.ExcelRow);
+                _logger.Information("\nUser: {Name} Inserted Successfully.\n--------------------------------------", user.Name);
             }
             catch (Exception ex)
             {
@@ -109,7 +121,8 @@ public class UserProcessingService : IUserProcessingService
                     ErrorMessage = ex.Message
                 });
                 
-                _logger.Error(ex, "Failed to process user: {Email} (Row {Row})", user.Email, user.ExcelRow);
+                _logger.Error(ex, "Error processing Excel row {Row}: {Message}", user.ExcelRow, ex.Message);
+                _logger.Error("Rolling back the current {Row}st Excel row and skipping to the next...", user.ExcelRow);
             }
         }
 
@@ -119,6 +132,8 @@ public class UserProcessingService : IUserProcessingService
         _logger.Information(
             "Processing completed in {Duration}. Success: {Success}, Duplicates: {Duplicates}, Failed: {Failed}",
             result.ProcessingTime, result.SuccessfulRecords, result.DuplicateRecords, result.FailedRecords);
+        
+        _logger.Information("\nProcessing complete.");
 
         return result;
     }
@@ -136,6 +151,7 @@ public class UserProcessingService : IUserProcessingService
         {
             // Step 1: Create user in IAM database
             var aspNetUserId = await _iamRepository.UpsertUserAsync(user, _userCommonFields, cancellationToken);
+            _logger.Information("User upserted in IAMDB.");
 
             // Step 2: Get or create division
             var divisionId = await _sdgRepository.GetOrCreateDivisionAsync(user.Division, cancellationToken);
@@ -150,6 +166,7 @@ public class UserProcessingService : IUserProcessingService
                 if (sectionId.HasValue)
                 {
                     await _sdgRepository.CreateSectionDivisionRelationshipAsync(sectionId.Value, divisionId, cancellationToken);
+                    _logger.Information("Section-Division relationship inserted in SDGDB.");
                 }
             }
 
@@ -161,26 +178,34 @@ public class UserProcessingService : IUserProcessingService
 
             // Create role-usergroup relationship
             await _sdgRepository.CreateRoleUserGroupRelationshipAsync(roleId, userGroupId, cancellationToken);
+            _logger.Information("Role-UserGroup relationship inserted in SDGDB.");
 
             // Step 6: Create user in SDG database
             var sdgUserId = await _sdgRepository.UpsertUserAsync(aspNetUserId, user, cancellationToken);
+            _logger.Information("User upserted in SDGDB.");
 
             // Step 7: Create user relationships
             await _sdgRepository.CreateUserDivisionRelationshipAsync(sdgUserId, divisionId, cancellationToken);
+            _logger.Information("User-Division relationship inserted in SDGDB.");
 
             if (defaultAgencyId.HasValue)
             {
                 await _sdgRepository.CreateUserAgencyRelationshipAsync(sdgUserId, defaultAgencyId.Value, cancellationToken);
+                _logger.Information("User-Agency relationship inserted in SDGDB.");
             }
 
             if (sectionId.HasValue)
             {
                 await _sdgRepository.CreateUserSectionRelationshipAsync(sdgUserId, sectionId.Value, cancellationToken);
+                _logger.Information("User-Section relationship inserted in SDGDB.");
             }
 
             // Step 8: Create subject
             var subjectId = await _sdgRepository.UpsertSubjectAsync(aspNetUserId, cancellationToken);
+            _logger.Information("Subjects upserted in SDGDB.");
+            
             await _sdgRepository.CreateSubjectUserGroupRelationshipAsync(subjectId, userGroupId, cancellationToken);
+            _logger.Information("Subject-UserGroup relationship inserted in SDGDB.");
         });
     }
 

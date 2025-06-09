@@ -15,7 +15,7 @@ public class IamRepository : IIamRepository
 
     public IamRepository(IConfiguration configuration, ILogger logger)
     {
-        _connectionString = configuration.GetConnectionString("IAMConnection") 
+        _connectionString = configuration.GetConnectionString("IAMConnection")
             ?? throw new ArgumentException("IAMConnection not found in configuration");
         _logger = logger.ForContext<IamRepository>();
     }
@@ -55,7 +55,7 @@ public class IamRepository : IIamRepository
         command.Parameters.AddWithValue("@Emails", emailList.ToArray());
 
         var result = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-        
+
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -93,7 +93,7 @@ public class IamRepository : IIamRepository
         await connection.OpenAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(query, connection);
-        
+
         var userId = Guid.NewGuid();
         command.Parameters.AddWithValue("@Id", userId);
         command.Parameters.AddWithValue("@UserName", user.Name);

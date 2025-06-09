@@ -33,6 +33,7 @@ class Program
         try
         {
             Log.Information("Application starting...");
+            Log.Information("Log file created at: {LogPath}", logPath);
 
             var host = CreateHostBuilder(args).Build();
 
@@ -90,6 +91,7 @@ class Program
 
         // Initialize duplicate handler
         await duplicateHandler.InitializeDuplicateFileAsync();
+        logger.Information("Duplicate file created at: {Path}", await duplicateHandler.GetDuplicateFilePath());
 
         var overallStopwatch = Stopwatch.StartNew();
         var totalProcessed = 0;

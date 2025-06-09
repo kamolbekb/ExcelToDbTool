@@ -54,7 +54,7 @@ public class SdgRepository : ISdgRepository
 
         var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
         _divisionCache[divisionName] = newId;
-        _logger.Information("Created new division: {DivisionName} with ID: {Id}", divisionName, newId);
+        _logger.Information("Division inserted in SDGDB.");
         
         return newId;
     }
@@ -116,7 +116,7 @@ public class SdgRepository : ISdgRepository
 
         var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
         _sectionCache[sectionName] = newId;
-        _logger.Information("Created new section: {SectionName} with ID: {Id}", sectionName, newId);
+        _logger.Information("Section inserted in SDGDB.");
         
         return newId;
     }
@@ -183,7 +183,7 @@ public class SdgRepository : ISdgRepository
 
         var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
         _roleCache[mappedRoleName] = newId;
-        _logger.Information("Created new role: {RoleName} with ID: {Id}", mappedRoleName, newId);
+        _logger.Information("Role '{RoleName}' inserted in SDGDB.", mappedRoleName);
         
         return newId;
     }
@@ -244,7 +244,7 @@ public class SdgRepository : ISdgRepository
 
         var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
         _userGroupCache[mappedUserGroupName] = newId;
-        _logger.Information("Created new user group: {UserGroupName} with ID: {Id}", mappedUserGroupName, newId);
+        _logger.Information("UserGroup '{UserGroupName}' inserted in SDGDB.", mappedUserGroupName);
         
         return newId;
     }

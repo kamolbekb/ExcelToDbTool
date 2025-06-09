@@ -34,8 +34,6 @@ public class DuplicateHandlerService : IDuplicateHandlerService
 
         await File.WriteAllTextAsync(_duplicateFilePath, string.Empty, cancellationToken);
         
-        _logger.Information("Duplicate file created at: {FilePath}", _duplicateFilePath);
-
         // Update .gitignore
         await UpdateGitignoreAsync(cancellationToken);
     }
