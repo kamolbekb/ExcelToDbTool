@@ -7,11 +7,23 @@ namespace DataInserter;
 
 class Program
 {
+
     static void Main()
     {
         string basePath = AppContext.BaseDirectory;
 
-        Console.WriteLine($"Base Path: {basePath}");
+        string projectRoot = Path.GetFullPath(Path.Combine(basePath, @"..\..\.."));
+        string timestamp = DateTime.Now.ToString("dd.MM.yyyy-HH-mm-ss");
+
+        var logsDir = Path.Combine(projectRoot, "Logs");
+
+        Directory.CreateDirectory(logsDir);
+        string logFilePath = Path.Combine(logsDir, $"DataInserterLog_{timestamp}.txt");
+        ConfigureLogFile(logFilePath);
+        File.Create(logFilePath).Dispose();
+        LogMessage($"Log file created at: {logFilePath}");
+
+        LogMessage($"Base Path: {basePath}");
 
         var builder = new ConfigurationBuilder()
             .SetBasePath(basePath)
@@ -28,7 +40,7 @@ class Program
 
         if (string.IsNullOrWhiteSpace(excelFilePath) || !File.Exists(excelFilePath))
         {
-            Console.WriteLine("Invalid file path. Exiting...");
+            LogMessage("Invalid file path. Exiting...");
             return;
         }
 
@@ -36,21 +48,16 @@ class Program
 
         if (users.Count == 0)
         {
-            Console.WriteLine("No users found in the Excel file. Exiting...");
+            LogMessage("No users found in the Excel file. Exiting...");
             return;
         }
 
-        string projectRoot = Path.GetFullPath(Path.Combine(basePath, @"..\..\.."));
         string duplicateRecordsDir = Path.Combine(projectRoot, "DuplicateRecords");
-
         Directory.CreateDirectory(duplicateRecordsDir);
-
-        string timestamp = DateTime.Now.ToString("dd.MM.yyyy-HH-mm-ss");
         string duplicateFilePath = Path.Combine(duplicateRecordsDir, $"duplicates_{timestamp}.txt");
-
         File.Create(duplicateFilePath).Dispose();
 
-        Console.WriteLine($"Duplicate file created at: {duplicateFilePath}");
+        LogMessage($"Duplicate file created at: {duplicateFilePath}");
 
         string gitignorePath = Path.Combine(basePath, ".gitignore");
         string relativeIgnorePath = Path.Combine("DuplicateRecords", "duplicates_*.txt");
@@ -58,8 +65,11 @@ class Program
         if (!File.Exists(gitignorePath) || !File.ReadAllLines(gitignorePath).Any(line => line.Trim() == relativeIgnorePath))
         {
             File.AppendAllText(gitignorePath, Environment.NewLine + relativeIgnorePath);
-            Console.WriteLine($".gitignore updated to ignore: {relativeIgnorePath}");
+            LogMessage($".gitignore updated to ignore: {relativeIgnorePath}");
         }
+
+        LogMessage("Starting to process users from Excel file...");
+        LogMessage($"Total users to process: {users.Count}");
 
 
         using (var conn1 = new NpgsqlConnection(IAMConnectionString))
@@ -67,7 +77,7 @@ class Program
         {
             conn1.Open();
             conn2.Open();
-            Console.WriteLine("Connected to both databases.");
+            LogMessage("Connected to both databases.\n");
 
             Guid aspNetUserId;
             int? agencyId = null;
@@ -89,7 +99,7 @@ class Program
                 {
                     try
                     {
-                        Console.WriteLine($"\nProcessing row {i + 1}: {user.Email}\n");
+                        LogMessage($"\nProcessing row {i + 1}: {user.Email}\n");
 
                         string checkExistingUserQuery = "SELECT \"Id\" FROM \"AspNetUsers\" WHERE \"Email\" = @Email";
                         string? existingUserId = null;
@@ -105,7 +115,7 @@ class Program
                                 string logLine = $"[Row {user.ExcelRow}] Existing user ID: {existingUserId}, Email: {user.Email}{Environment.NewLine}\n";
                                 File.AppendAllText(duplicateFilePath, logLine);
 
-                                Console.WriteLine($"Skipping row {i + 1} because Email: '{user.Email}' is already in use\n");
+                                LogMessage($"Skipping row {i + 1} because Email: '{user.Email}' is already in use\n");
                                 continue;
                             }
                         }
@@ -149,7 +159,7 @@ class Program
                             upsertCmd.Parameters.AddWithValue("IsFromActiveDirectory", false);
 
                             aspNetUserId = (Guid)upsertCmd.ExecuteScalar();
-                            Console.WriteLine("User upserted in IAMDB.");
+                            LogMessage("User upserted in IAMDB.");
                         }
 
                         string checkDivisionQuery = "SELECT \"Id\" FROM \"Divisions\" WHERE \"Name\" = @Name";
@@ -173,7 +183,7 @@ class Program
                                 {
                                     insertDivCmd.Parameters.AddWithValue("@Name", user.Devision);
                                     divisionId = Convert.ToInt32(insertDivCmd.ExecuteScalar());
-                                    Console.WriteLine("Division inserted in SDGDB.");
+                                    LogMessage("Division inserted in SDGDB.");
                                 }
                             }
                         }
@@ -201,7 +211,7 @@ class Program
                                     {
                                         insertSecCmd.Parameters.AddWithValue("@Name", user.Section);
                                         sectionId = Convert.ToInt32(insertSecCmd.ExecuteScalar());
-                                        Console.WriteLine("Section inserted in SDGDB.");
+                                        LogMessage("Section inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -228,7 +238,7 @@ class Program
                                             insertSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
                                             insertSecDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
                                             insertSecDivCmd.ExecuteNonQuery();
-                                            Console.WriteLine("Section-Division relationship inserted in SDGDB.");
+                                            LogMessage("Section-Division relationship inserted in SDGDB.");
                                         }
                                     }
                                 }
@@ -261,7 +271,7 @@ class Program
                         if (existingRoles.TryGetValue(matchedRole.ToLower(), out int existingRoleId))
                         {
                             roleId = existingRoleId;
-                            Console.WriteLine($"Role '{matchedRole}' exists in SDGDB.");
+                            LogMessage($"Role '{matchedRole}' exists in SDGDB.");
                         }
                         else
                         {
@@ -275,7 +285,7 @@ class Program
                                 roleId = Convert.ToInt32(insertRoleCmd.ExecuteScalar());
                             }
 
-                            Console.WriteLine($"Role '{matchedRole}' inserted in SDGDB.");
+                            LogMessage($"Role '{matchedRole}' inserted in SDGDB.");
                         }
 
 
@@ -307,7 +317,7 @@ class Program
                         if (existingUserGroups.TryGetValue(matchedUserGroup.ToLower(), out int existingUserGroupId))
                         {
                             userGroupId = existingUserGroupId;
-                            Console.WriteLine($"UserGroup '{matchedUserGroup}' exists in SDGDB.");
+                            LogMessage($"UserGroup '{matchedUserGroup}' exists in SDGDB.");
                         }
                         else
                         {
@@ -320,7 +330,7 @@ class Program
                                 userGroupId = Convert.ToInt32(insertUserGroupCmd.ExecuteScalar());
                             }
 
-                            Console.WriteLine($"UserGroup '{matchedUserGroup}' inserted in SDGDB.");
+                            LogMessage($"UserGroup '{matchedUserGroup}' inserted in SDGDB.");
                         }
 
                         if (roleId.HasValue && userGroupId.HasValue)
@@ -345,7 +355,7 @@ class Program
                                         insertRoleUserGroupCmd.Parameters.AddWithValue("@RoleId", roleId);
                                         insertRoleUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
                                         insertRoleUserGroupCmd.ExecuteNonQuery();
-                                        Console.WriteLine("Role-UserGroup relationship inserted in SDGDB.");
+                                        LogMessage("Role-UserGroup relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -374,7 +384,7 @@ class Program
                                  user.Devision == "ALL")); //Here should be changed to ADMINISTRATOR
 
                             sdgUserId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
-                            Console.WriteLine("User upserted in SDGDB.");
+                            LogMessage("User upserted in SDGDB.");
                         }
 
                         if (sdgUserId.HasValue && divisionId.HasValue)
@@ -399,7 +409,7 @@ class Program
                                         insertUserDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
                                         insertUserDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
                                         insertUserDivCmd.ExecuteNonQuery();
-                                        Console.WriteLine("User-Division relationship inserted in SDGDB.");
+                                        LogMessage("User-Division relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -428,7 +438,7 @@ class Program
                                         insertUserAgencyCmd.Parameters.AddWithValue("@UserId", sdgUserId);
                                         insertUserAgencyCmd.Parameters.AddWithValue("@AgencyId", agencyId);
                                         insertUserAgencyCmd.ExecuteNonQuery();
-                                        Console.WriteLine("User-Agency relationship inserted in SDGDB.");
+                                        LogMessage("User-Agency relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -456,7 +466,7 @@ class Program
                                         insertSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
                                         insertSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
                                         insertSecDivCmd.ExecuteNonQuery();
-                                        Console.WriteLine("User-Section relationship inserted in SDGDB.");
+                                        LogMessage("User-Section relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -476,7 +486,7 @@ class Program
                             upsertUserCmd.Parameters.AddWithValue("@Name", aspNetUserId);
 
                             subjectId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
-                            Console.WriteLine("Subjects upserted in SDGDB.");
+                            LogMessage("Subjects upserted in SDGDB.");
                         }
 
                         if (subjectId.HasValue && userGroupId.HasValue)
@@ -502,7 +512,7 @@ class Program
                                         insertSubjectUserGroupCmd.Parameters.AddWithValue("@SubjectId", subjectId);
                                         insertSubjectUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
                                         insertSubjectUserGroupCmd.ExecuteNonQuery();
-                                        Console.WriteLine("Subject-UserGroup relationship inserted in SDGDB.");
+                                        LogMessage("Subject-UserGroup relationship inserted in SDGDB.");
                                     }
                                 }
                             }
@@ -511,13 +521,13 @@ class Program
                         transaction1.Commit();
                         transaction2.Commit();
 
-                        Console.WriteLine(
+                        LogMessage(
                             $"\nUser: {user.Name} Inserted Successfully.\n--------------------------------------");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Error processing Excel row {user.ExcelRow}: {ex.Message}");
-                        Console.WriteLine(
+                        LogMessage($"Error processing Excel row {user.ExcelRow}: {ex.Message}");
+                        LogMessage(
                             $"Rolling back the current {user.ExcelRow}st Excel row and skipping to the next...");
 
                         transaction1.Rollback();
@@ -525,7 +535,7 @@ class Program
 
                         if (ex is NpgsqlException)
                         {
-                            Console.WriteLine("Database connection error. Stopping processing.");
+                            LogMessage("Database connection error. Stopping processing.");
                             break;
                         }
                     }
@@ -533,6 +543,33 @@ class Program
             }
         }
 
-        Console.WriteLine("\nProcessing complete.");
+        LogMessage("\nProcessing complete.");
+    }
+
+    private static string? _logFilePath;
+
+    private static void ConfigureLogFile(string logFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(logFilePath))
+            throw new ArgumentException("Log file path cannot be empty", nameof(logFilePath));
+
+        var logDir = Path.GetDirectoryName(logFilePath);
+        if (!string.IsNullOrWhiteSpace(logDir))
+            Directory.CreateDirectory(logDir);
+
+        _logFilePath = logFilePath;
+        File.Create(logFilePath).Dispose();
+    }
+    private static void LogMessage(string message, bool includeTimestamp = true)
+    {
+        if (string.IsNullOrWhiteSpace(_logFilePath))
+            throw new InvalidOperationException("Log file path not configured. Call ConfigureLogFile first.");
+
+        string formattedMessage = includeTimestamp
+            ? $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}"
+            : message;
+
+        Console.WriteLine(formattedMessage);
+        File.AppendAllText(_logFilePath, formattedMessage + Environment.NewLine);
     }
 }
