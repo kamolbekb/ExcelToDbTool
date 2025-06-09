@@ -1,575 +1,189 @@
-﻿using DataInserter.Models;
+using DataInserter.Configuration;
+using DataInserter.Constants;
+using DataInserter.Extensions;
+using DataInserter.Services.Interfaces;
 using Microsoft.Extensions.Configuration;
-using Npgsql;
-using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Serilog;
+using System.Diagnostics;
 
 namespace DataInserter;
 
 class Program
 {
-
-    static void Main()
+    static async Task Main(string[] args)
     {
-        string basePath = AppContext.BaseDirectory;
+        // Configure Serilog early
+        var timestamp = DateTime.Now.ToString("dd.MM.yyyy-HH-mm-ss");
+        var logPath = Path.Combine(
+            GetProjectRoot(),
+            ApplicationConstants.DirectoryNames.Logs,
+            string.Format(ApplicationConstants.LogFilePatterns.DataInserterLog, timestamp));
 
-        string projectRoot = Path.GetFullPath(Path.Combine(basePath, @"..\..\.."));
-        string timestamp = DateTime.Now.ToString("dd.MM.yyyy-HH-mm-ss");
+        Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 
-        var logsDir = Path.Combine(projectRoot, "Logs");
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.Console()
+            .WriteTo.File(logPath, rollingInterval: RollingInterval.Infinite)
+            .CreateLogger();
 
-        Directory.CreateDirectory(logsDir);
-        string logFilePath = Path.Combine(logsDir, $"DataInserterLog_{timestamp}.txt");
-        ConfigureLogFile(logFilePath);
-        File.Create(logFilePath).Dispose();
-        LogMessage($"Log file created at: {logFilePath}");
-
-        LogMessage($"Base Path: {basePath}");
-
-        var builder = new ConfigurationBuilder()
-            .SetBasePath(basePath)
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-
-        IConfigurationRoot configuration = builder.Build();
-
-        string IAMConnectionString = configuration.GetConnectionString("IAMConnection");
-        string SDGConnectionString = configuration.GetConnectionString("SDGConnection");
-
-        var userClaims = configuration.GetSection("UserCommonFields").Get<UserCommonFields>();
-
-        string excelFilePath = configuration.GetSection("ExcelPath").Value;
-
-        if (string.IsNullOrWhiteSpace(excelFilePath) || !File.Exists(excelFilePath))
+        try
         {
-            LogMessage("Invalid file path. Exiting...");
-            return;
+            Log.Information("Application starting...");
+
+            var host = CreateHostBuilder(args).Build();
+            
+            await RunApplicationAsync(host);
+            
+            Log.Information("Application completed successfully");
         }
-
-        List<ExcelUser> users = ExcelUser.ReadUsersFromExcel(excelFilePath);
-
-        if (users.Count == 0)
+        catch (Exception ex)
         {
-            LogMessage("No users found in the Excel file. Exiting...");
-            return;
+            Log.Fatal(ex, "Application terminated unexpectedly");
+            Environment.Exit(1);
         }
-
-        string duplicateRecordsDir = Path.Combine(projectRoot, "DuplicateRecords");
-        Directory.CreateDirectory(duplicateRecordsDir);
-        string duplicateFilePath = Path.Combine(duplicateRecordsDir, $"duplicates_{timestamp}.txt");
-        File.Create(duplicateFilePath).Dispose();
-
-        LogMessage($"Duplicate file created at: {duplicateFilePath}");
-
-        string gitignorePath = Path.Combine(basePath, ".gitignore");
-        string relativeIgnorePath = Path.Combine("DuplicateRecords", "duplicates_*.txt");
-
-        if (!File.Exists(gitignorePath) || !File.ReadAllLines(gitignorePath).Any(line => line.Trim() == relativeIgnorePath))
+        finally
         {
-            File.AppendAllText(gitignorePath, Environment.NewLine + relativeIgnorePath);
-            LogMessage($".gitignore updated to ignore: {relativeIgnorePath}");
+            await Log.CloseAndFlushAsync();
         }
+    }
 
-        LogMessage("Starting to process users from Excel file...");
-        LogMessage($"Total users to process: {users.Count}");
-
-
-        using (var conn1 = new NpgsqlConnection(IAMConnectionString))
-        using (var conn2 = new NpgsqlConnection(SDGConnectionString))
-        {
-            conn1.Open();
-            conn2.Open();
-            LogMessage("Connected to both databases.\n");
-
-            Guid aspNetUserId;
-            int? agencyId = null;
-
-            string getDefaultAgency = "SELECT \"Id\" FROM \"Agencies\" ORDER BY \"Id\" LIMIT 1";
-
-            using (var getAgencyCmd = new NpgsqlCommand(getDefaultAgency, conn2))
+    static IHostBuilder CreateHostBuilder(string[] args) =>
+        Host.CreateDefaultBuilder(args)
+            .UseSerilog()
+            .ConfigureAppConfiguration((context, config) =>
             {
-                var result = getAgencyCmd.ExecuteScalar();
-                agencyId = result != null ? Convert.ToInt32(result) : null;
-            }
-
-            for (int i = 0; i < users.Count; i++)
+                config.SetBasePath(AppContext.BaseDirectory)
+                      .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                      .AddEnvironmentVariables()
+                      .AddCommandLine(args);
+            })
+            .ConfigureServices((context, services) =>
             {
-                var user = users[i];
+                // Register Serilog Logger first
+                services.AddSingleton<ILogger>(Log.Logger);
+                services.AddDataInserterServices(context.Configuration);
+            });
 
-                using (var transaction1 = conn1.BeginTransaction())
-                using (var transaction2 = conn2.BeginTransaction())
+    static async Task RunApplicationAsync(IHost host)
+    {
+        using var scope = host.Services.CreateScope();
+        var services = scope.ServiceProvider;
+
+        var configuration = services.GetRequiredService<IConfiguration>();
+        var appConfig = services.GetRequiredService<IOptions<ApplicationConfiguration>>().Value;
+        var logger = services.GetRequiredService<ILogger>().ForContext<Program>();
+
+        var excelReader = services.GetRequiredService<IExcelReaderService>();
+        var userProcessor = services.GetRequiredService<IUserProcessingService>();
+        var duplicateHandler = services.GetRequiredService<IDuplicateHandlerService>();
+
+        // Validate configuration
+        if (string.IsNullOrWhiteSpace(appConfig.ExcelPath) || !File.Exists(appConfig.ExcelPath))
+        {
+            logger.Error("Invalid Excel file path: {Path}", appConfig.ExcelPath);
+            throw new InvalidOperationException($"Excel file not found: {appConfig.ExcelPath}");
+        }
+
+        // Initialize duplicate handler
+        await duplicateHandler.InitializeDuplicateFileAsync();
+
+        var overallStopwatch = Stopwatch.StartNew();
+        var totalProcessed = 0;
+        var totalSuccess = 0;
+        var totalDuplicates = 0;
+        var totalFailed = 0;
+
+        try
+        {
+            if (appConfig.BatchSize > 1)
+            {
+                logger.Information("Processing users in batches of {BatchSize}", appConfig.BatchSize);
+
+                await foreach (var batch in excelReader.ReadUsersInBatchesAsync(appConfig.ExcelPath, appConfig.BatchSize))
                 {
-                    try
+                    logger.Information("Processing batch of {Count} users", batch.Count);
+                    
+                    var result = await userProcessor.ProcessUsersBatchAsync(batch);
+                    
+                    totalProcessed += result.TotalRecords;
+                    totalSuccess += result.SuccessfulRecords;
+                    totalDuplicates += result.DuplicateRecords;
+                    totalFailed += result.FailedRecords;
+
+                    logger.Information(
+                        "Batch completed. Success: {Success}, Duplicates: {Duplicates}, Failed: {Failed}",
+                        result.SuccessfulRecords, result.DuplicateRecords, result.FailedRecords);
+
+                    if (result.Errors.Any())
                     {
-                        LogMessage($"\nProcessing row {i + 1}: {user.Email}\n");
-
-                        string checkExistingUserQuery = "SELECT \"Id\" FROM \"AspNetUsers\" WHERE \"Email\" = @Email";
-                        string? existingUserId = null;
-
-                        using (var checkExistingUserCmd = new NpgsqlCommand(checkExistingUserQuery, conn1, transaction1))
+                        foreach (var error in result.Errors)
                         {
-                            checkExistingUserCmd.Parameters.AddWithValue("@Email", user.Email);
-                            var result = checkExistingUserCmd.ExecuteScalar();
-
-                            if (result != null)
-                            {
-                                existingUserId = result.ToString();
-                                string logLine = $"[Row {user.ExcelRow}] Existing user ID: {existingUserId}, Email: {user.Email}{Environment.NewLine}\n";
-                                File.AppendAllText(duplicateFilePath, logLine);
-
-                                LogMessage($"Skipping row {i + 1} because Email: '{user.Email}' is already in use\n");
-                                continue;
-                            }
-                        }
-
-                        string upsertAspNetUserQuery = @"
-                            INSERT INTO ""AspNetUsers"" (
-                                ""Id"", ""UserName"", ""NormalizedUserName"", ""Email"", ""NormalizedEmail"", ""PasswordHash"", 
-                                ""SecurityStamp"", ""ConcurrencyStamp"", ""Status"", ""UserType"", ""EmailConfirmed"", ""PhoneNumberConfirmed"", 
-                                ""TwoFactorEnabled"", ""LockoutEnabled"", ""AccessFailedCount"", ""IsFromActiveDirectory""
-                                ) VALUES (
-                                    @Id, @UserName, @NormalizedUserName, @Email, @NormalizedEmail, @PasswordHash, 
-                                    @SecurityStamp, @ConcurrencyStamp, @Status, @UserType, @EmailConfirmed, @PhoneNumberConfirmed, 
-                                    @TwoFactorEnabled, @LockoutEnabled, @AccessFailedCount, @IsFromActiveDirectory
-                                    )
-                            ON CONFLICT (""NormalizedUserName"") DO UPDATE SET 
-                                ""Email"" = EXCLUDED.""Email"", 
-                                ""NormalizedEmail"" = EXCLUDED.""NormalizedEmail"", 
-                                ""PasswordHash"" = EXCLUDED.""PasswordHash"", 
-                                ""SecurityStamp"" = EXCLUDED.""SecurityStamp"", 
-                                ""ConcurrencyStamp"" = EXCLUDED.""ConcurrencyStamp"" 
-                            RETURNING ""Id"";";
-
-                        using (var upsertCmd = new NpgsqlCommand(upsertAspNetUserQuery, conn1, transaction1))
-                        {
-                            Guid userId = Guid.NewGuid();
-                            upsertCmd.Parameters.AddWithValue("Id", userId);
-                            upsertCmd.Parameters.AddWithValue("UserName", user.Name);
-                            upsertCmd.Parameters.AddWithValue("NormalizedUserName", user.Name.ToUpper());
-                            upsertCmd.Parameters.AddWithValue("Email", user.Email);
-                            upsertCmd.Parameters.AddWithValue("NormalizedEmail", user.Email.ToUpper());
-                            upsertCmd.Parameters.AddWithValue("PasswordHash", userClaims.PasswordHash);
-                            upsertCmd.Parameters.AddWithValue("SecurityStamp", userClaims.SecurityStamp);
-                            upsertCmd.Parameters.AddWithValue("ConcurrencyStamp", userClaims.ConcurrencyStamp);
-                            upsertCmd.Parameters.AddWithValue("Status", 0);
-                            upsertCmd.Parameters.AddWithValue("UserType", 0);
-                            upsertCmd.Parameters.AddWithValue("EmailConfirmed", true);
-                            upsertCmd.Parameters.AddWithValue("PhoneNumberConfirmed", false);
-                            upsertCmd.Parameters.AddWithValue("TwoFactorEnabled", false);
-                            upsertCmd.Parameters.AddWithValue("LockoutEnabled", true);
-                            upsertCmd.Parameters.AddWithValue("AccessFailedCount", 0);
-                            upsertCmd.Parameters.AddWithValue("IsFromActiveDirectory", false);
-
-                            aspNetUserId = (Guid)upsertCmd.ExecuteScalar();
-                            LogMessage("User upserted in IAMDB.");
-                        }
-
-                        string checkDivisionQuery = "SELECT \"Id\" FROM \"Divisions\" WHERE \"Name\" = @Name";
-                        int? divisionId = null;
-
-                        using (var checkDivCmd = new NpgsqlCommand(checkDivisionQuery, conn2, transaction2))
-                        {
-                            checkDivCmd.Parameters.AddWithValue("@Name", user.Devision);
-                            var result = checkDivCmd.ExecuteScalar();
-
-                            if (result != null)
-                            {
-                                divisionId = Convert.ToInt32(result);
-                            }
-                            else
-                            {
-                                string insertDivisionQuery =
-                                    "INSERT INTO \"Divisions\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
-
-                                using (var insertDivCmd = new NpgsqlCommand(insertDivisionQuery, conn2, transaction2))
-                                {
-                                    insertDivCmd.Parameters.AddWithValue("@Name", user.Devision);
-                                    divisionId = Convert.ToInt32(insertDivCmd.ExecuteScalar());
-                                    LogMessage("Division inserted in SDGDB.");
-                                }
-                            }
-                        }
-
-                        int? sectionId = null;
-
-                        if (user.Section != null && user.Section != "")
-                        {
-                            string checkSectionQuery = "SELECT \"Id\" FROM \"Sections\" WHERE \"Name\" = @Name";
-
-                            using (var checkSecCmd = new NpgsqlCommand(checkSectionQuery, conn2, transaction2))
-                            {
-                                checkSecCmd.Parameters.AddWithValue("@Name", user.Section);
-                                var result = checkSecCmd.ExecuteScalar();
-                                if (result != null)
-                                {
-                                    sectionId = Convert.ToInt32(result);
-                                }
-                                else
-                                {
-                                    string insertSectionQuery =
-                                        "INSERT INTO \"Sections\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
-                                    using (var insertSecCmd =
-                                           new NpgsqlCommand(insertSectionQuery, conn2, transaction2))
-                                    {
-                                        insertSecCmd.Parameters.AddWithValue("@Name", user.Section);
-                                        sectionId = Convert.ToInt32(insertSecCmd.ExecuteScalar());
-                                        LogMessage("Section inserted in SDGDB.");
-                                    }
-                                }
-                            }
-
-                            if (sectionId.HasValue && divisionId.HasValue)
-                            {
-                                string checkSectionDivQuery =
-                                    "SELECT COUNT(*) FROM \"SectionDivisions\" WHERE \"SectionId\" = @SectionId AND \"DivisionId\" = @DivisionId";
-
-                                using (var checkSecDivCmd =
-                                       new NpgsqlCommand(checkSectionDivQuery, conn2, transaction2))
-                                {
-                                    checkSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
-                                    checkSecDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
-                                    long secDivCount = Convert.ToInt64(checkSecDivCmd.ExecuteScalar() ?? 0);
-
-                                    if (secDivCount == 0)
-                                    {
-                                        string insertSectionDivQuery =
-                                            "INSERT INTO \"SectionDivisions\" (\"SectionId\", \"DivisionId\") VALUES (@SectionId, @DivisionId)";
-                                        using (var insertSecDivCmd =
-                                               new NpgsqlCommand(insertSectionDivQuery, conn2, transaction2))
-                                        {
-                                            insertSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
-                                            insertSecDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
-                                            insertSecDivCmd.ExecuteNonQuery();
-                                            LogMessage("Section-Division relationship inserted in SDGDB.");
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        string checkRoleQuery = "SELECT \"Id\", \"Name\" FROM \"Roles\"";
-                        var existingRoles = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                        int? roleId = null;
-
-                        using (var checkRoleCmd = new NpgsqlCommand(checkRoleQuery, conn2, transaction2))
-                        using (var reader = checkRoleCmd.ExecuteReader())
-                        {
-                            while (reader.Read())
-                                existingRoles[reader.GetString(1).Trim().ToLower()] = reader.GetInt32(0);
-                        }
-
-                        var roleTemplates = new List<string> { "Data Provider", "Data Approver", "Administrator" };
-
-                        string normalizedRole = user.Role.Trim();
-
-                        string matchedRole = roleTemplates
-                                                 .FirstOrDefault(template => Regex.IsMatch(normalizedRole,
-                                                     $@"\b{template.Split(' ').Last()}\b", RegexOptions.IgnoreCase))
-                                             ?? normalizedRole;
-
-                        if (Regex.IsMatch(normalizedRole, @"\d+$"))
-                            matchedRole += " " + Regex.Match(normalizedRole, @"\d+$").Value;
-
-                        if (existingRoles.TryGetValue(matchedRole.ToLower(), out int existingRoleId))
-                        {
-                            roleId = existingRoleId;
-                            LogMessage($"Role '{matchedRole}' exists in SDGDB.");
-                        }
-                        else
-                        {
-                            string insertRoleQuery =
-                                "INSERT INTO \"Roles\" (\"Name\", \"Enabled\", \"ApplicationId\") VALUES (@Name, @Enabled, @ApplicationId) RETURNING \"Id\"";
-                            using (var insertRoleCmd = new NpgsqlCommand(insertRoleQuery, conn2, transaction2))
-                            {
-                                insertRoleCmd.Parameters.AddWithValue("@Name", matchedRole);
-                                insertRoleCmd.Parameters.AddWithValue("@Enabled", true);
-                                insertRoleCmd.Parameters.AddWithValue("@ApplicationId", 1);
-                                roleId = Convert.ToInt32(insertRoleCmd.ExecuteScalar());
-                            }
-
-                            LogMessage($"Role '{matchedRole}' inserted in SDGDB.");
-                        }
-
-
-                        string checkUserGroupQuery = "SELECT \"Id\", \"Name\" FROM \"UserGroups\"";
-                        var existingUserGroups = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                        int? userGroupId = null;
-
-                        using (var checkUserGroupCmd = new NpgsqlCommand(checkUserGroupQuery, conn2, transaction2))
-                        using (var reader = checkUserGroupCmd.ExecuteReader())
-                        {
-                            while (reader.Read())
-                                existingUserGroups[reader.GetString(1).Trim().ToLower()] = reader.GetInt32(0);
-                        }
-
-                        var userGroupTemplates = new List<string>
-                            { "Data Approver Group", "Data Provider Group", "Admin Group" };
-
-                        string normalizedUserGroup = user.UserGroup.Trim();
-
-                        string matchedUserGroup = userGroupTemplates
-                                                      .FirstOrDefault(template => Regex.IsMatch(normalizedUserGroup,
-                                                          $@"\b{template.Split(' ').ElementAt(1)}\b",
-                                                          RegexOptions.IgnoreCase))
-                                                  ?? normalizedUserGroup;
-
-                        if (Regex.IsMatch(normalizedUserGroup, @"\d+$"))
-                            matchedUserGroup += " " + Regex.Match(normalizedUserGroup, @"\d+$").Value;
-
-                        if (existingUserGroups.TryGetValue(matchedUserGroup.ToLower(), out int existingUserGroupId))
-                        {
-                            userGroupId = existingUserGroupId;
-                            LogMessage($"UserGroup '{matchedUserGroup}' exists in SDGDB.");
-                        }
-                        else
-                        {
-                            string insertUserGroupQuery =
-                                "INSERT INTO \"UserGroups\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
-                            using (var insertUserGroupCmd =
-                                   new NpgsqlCommand(insertUserGroupQuery, conn2, transaction2))
-                            {
-                                insertUserGroupCmd.Parameters.AddWithValue("@Name", matchedUserGroup);
-                                userGroupId = Convert.ToInt32(insertUserGroupCmd.ExecuteScalar());
-                            }
-
-                            LogMessage($"UserGroup '{matchedUserGroup}' inserted in SDGDB.");
-                        }
-
-                        if (roleId.HasValue && userGroupId.HasValue)
-                        {
-                            string checkRoleUserGroupQuery =
-                                "SELECT COUNT(*) FROM \"RoleUserGroups\" WHERE \"RoleId\" = @RoleId AND \"UserGroupId\" = @UserGroupId";
-
-                            using (var checkRoleUserGroupCmd =
-                                   new NpgsqlCommand(checkRoleUserGroupQuery, conn2, transaction2))
-                            {
-                                checkRoleUserGroupCmd.Parameters.AddWithValue("@RoleId", roleId);
-                                checkRoleUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
-                                long roleUserGroupCount = Convert.ToInt64(checkRoleUserGroupCmd.ExecuteScalar() ?? 0);
-
-                                if (roleUserGroupCount == 0)
-                                {
-                                    string insertRoleUserGroupQuery =
-                                        "INSERT INTO \"RoleUserGroups\" (\"RoleId\", \"UserGroupId\") VALUES (@RoleId, @UserGroupId)";
-                                    using (var insertRoleUserGroupCmd =
-                                           new NpgsqlCommand(insertRoleUserGroupQuery, conn2, transaction2))
-                                    {
-                                        insertRoleUserGroupCmd.Parameters.AddWithValue("@RoleId", roleId);
-                                        insertRoleUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
-                                        insertRoleUserGroupCmd.ExecuteNonQuery();
-                                        LogMessage("Role-UserGroup relationship inserted in SDGDB.");
-                                    }
-                                }
-                            }
-                        }
-
-                        string upsertUserQuery = @"
-                                INSERT INTO ""Users"" (""Sub"", ""IsApiAdmin"",""ControlLevel"",""IsTerminated"",""ActorLevel"") 
-                                VALUES (@Sub, @IsApiAdmin,@ControlLevel,@IsTerminated,@ActorLevel)
-                                ON CONFLICT (""Sub"") 
-                                DO UPDATE SET ""IsApiAdmin"" = EXCLUDED.""IsApiAdmin"",
-                                    ""ControlLevel"" = EXCLUDED.""ControlLevel"",
-                                    ""IsTerminated"" = EXCLUDED.""IsTerminated"",
-                                    ""ActorLevel"" = EXCLUDED.""ActorLevel""
-                                RETURNING ""Id"";";
-
-                        int? sdgUserId = null;
-
-                        using (var upsertUserCmd = new NpgsqlCommand(upsertUserQuery, conn2, transaction2))
-                        {
-                            upsertUserCmd.Parameters.AddWithValue("@Sub", aspNetUserId);
-                            upsertUserCmd.Parameters.AddWithValue("@ControlLevel", (int)user.ControlLevel);
-                            upsertUserCmd.Parameters.AddWithValue("@IsTerminated", false);
-                            upsertUserCmd.Parameters.AddWithValue("@ActorLevel", 1);
-                            upsertUserCmd.Parameters.AddWithValue("@IsApiAdmin",
-                                (user.Devision == "ADMINISTRATOR" ||
-                                 user.Devision == "ALL")); //Here should be changed to ADMINISTRATOR
-
-                            sdgUserId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
-                            LogMessage("User upserted in SDGDB.");
-                        }
-
-                        if (sdgUserId.HasValue && divisionId.HasValue)
-                        {
-                            string checkUserDivQuery =
-                                "SELECT COUNT(*) FROM \"UserDivisions\" WHERE \"UserId\" = @UserId AND \"DivisionId\" = @DivisionId";
-
-                            using (var checkSecDivCmd =
-                                   new NpgsqlCommand(checkUserDivQuery, conn2, transaction2))
-                            {
-                                checkSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
-                                checkSecDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
-                                long secDivCount = Convert.ToInt64(checkSecDivCmd.ExecuteScalar() ?? 0);
-
-                                if (secDivCount == 0)
-                                {
-                                    string insertUserDivQuery =
-                                        "INSERT INTO \"UserDivisions\" (\"UserId\", \"DivisionId\") VALUES (@UserId, @DivisionId)";
-                                    using (var insertUserDivCmd =
-                                           new NpgsqlCommand(insertUserDivQuery, conn2, transaction2))
-                                    {
-                                        insertUserDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
-                                        insertUserDivCmd.Parameters.AddWithValue("@DivisionId", divisionId);
-                                        insertUserDivCmd.ExecuteNonQuery();
-                                        LogMessage("User-Division relationship inserted in SDGDB.");
-                                    }
-                                }
-                            }
-                        }
-
-                        if (sdgUserId.HasValue && agencyId.HasValue)
-                        {
-                            string checkUserAgencyQuery =
-                                "SELECT COUNT(*) FROM \"UserAgencies\" WHERE \"UserId\" = @UserId AND \"AgencyId\" = @AgencyId";
-
-                            using (var checkUserAgencyCmd =
-                                   new NpgsqlCommand(checkUserAgencyQuery, conn2, transaction2))
-                            {
-                                checkUserAgencyCmd.Parameters.AddWithValue("@UserId", sdgUserId);
-                                checkUserAgencyCmd.Parameters.AddWithValue("@AgencyId", agencyId);
-                                long secDivCount = Convert.ToInt64(checkUserAgencyCmd.ExecuteScalar() ?? 0);
-
-                                if (secDivCount == 0)
-                                {
-                                    string insertUserAgencyQuery =
-                                        "INSERT INTO \"UserAgencies\" (\"UserId\", \"AgencyId\") VALUES (@UserId, @AgencyId)";
-
-                                    using (var insertUserAgencyCmd =
-                                           new NpgsqlCommand(insertUserAgencyQuery, conn2, transaction2))
-                                    {
-                                        insertUserAgencyCmd.Parameters.AddWithValue("@UserId", sdgUserId);
-                                        insertUserAgencyCmd.Parameters.AddWithValue("@AgencyId", agencyId);
-                                        insertUserAgencyCmd.ExecuteNonQuery();
-                                        LogMessage("User-Agency relationship inserted in SDGDB.");
-                                    }
-                                }
-                            }
-                        }
-
-                        if (sectionId.HasValue && sdgUserId.HasValue)
-                        {
-                            string checkSectionDivQuery =
-                                "SELECT COUNT(*) FROM \"UserSections\" WHERE \"SectionId\" = @SectionId AND \"UserId\" = @UserId";
-
-                            using (var checkSecDivCmd =
-                                   new NpgsqlCommand(checkSectionDivQuery, conn2, transaction2))
-                            {
-                                checkSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
-                                checkSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
-                                long secDivCount = Convert.ToInt64(checkSecDivCmd.ExecuteScalar() ?? 0);
-
-                                if (secDivCount == 0)
-                                {
-                                    string insertSectionDivQuery =
-                                        "INSERT INTO \"UserSections\" (\"SectionId\", \"UserId\") VALUES (@SectionId, @UserId)";
-                                    using (var insertSecDivCmd =
-                                           new NpgsqlCommand(insertSectionDivQuery, conn2, transaction2))
-                                    {
-                                        insertSecDivCmd.Parameters.AddWithValue("@SectionId", sectionId);
-                                        insertSecDivCmd.Parameters.AddWithValue("@UserId", sdgUserId);
-                                        insertSecDivCmd.ExecuteNonQuery();
-                                        LogMessage("User-Section relationship inserted in SDGDB.");
-                                    }
-                                }
-                            }
-                        }
-
-                        string upsertSubject = @"
-                                INSERT INTO ""Subjects"" (""Sub"", ""Name"") 
-                                VALUES (@Sub, @Name)
-                                ON CONFLICT (""Sub"") 
-                                DO UPDATE SET ""Name"" = EXCLUDED.""Name""
-                                RETURNING ""Id"";";
-                        int? subjectId = null;
-
-                        using (var upsertUserCmd = new NpgsqlCommand(upsertSubject, conn2, transaction2))
-                        {
-                            upsertUserCmd.Parameters.AddWithValue("@Sub", aspNetUserId);
-                            upsertUserCmd.Parameters.AddWithValue("@Name", aspNetUserId);
-
-                            subjectId = Convert.ToInt32(upsertUserCmd.ExecuteScalar());
-                            LogMessage("Subjects upserted in SDGDB.");
-                        }
-
-                        if (subjectId.HasValue && userGroupId.HasValue)
-                        {
-                            string checkRoleUserGroupQuery =
-                                "SELECT COUNT(*) FROM \"SubjectUserGroups\" WHERE \"UserGroupId\" = @UserGroupId AND \"SubjectId\" = @SubjectId";
-
-                            using (var checkRoleUserGroupCmd =
-                                   new NpgsqlCommand(checkRoleUserGroupQuery, conn2, transaction2))
-                            {
-                                checkRoleUserGroupCmd.Parameters.AddWithValue("@SubjectId", subjectId);
-                                checkRoleUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
-                                long roleUserGroupCount = Convert.ToInt64(checkRoleUserGroupCmd.ExecuteScalar() ?? 0);
-
-                                if (roleUserGroupCount == 0)
-                                {
-                                    string insertSubjectUserGroupQuery =
-                                        "INSERT INTO \"SubjectUserGroups\" (\"UserGroupId\",\"SubjectId\") VALUES (@UserGroupId,@SubjectId)";
-
-                                    using (var insertSubjectUserGroupCmd =
-                                           new NpgsqlCommand(insertSubjectUserGroupQuery, conn2, transaction2))
-                                    {
-                                        insertSubjectUserGroupCmd.Parameters.AddWithValue("@SubjectId", subjectId);
-                                        insertSubjectUserGroupCmd.Parameters.AddWithValue("@UserGroupId", userGroupId);
-                                        insertSubjectUserGroupCmd.ExecuteNonQuery();
-                                        LogMessage("Subject-UserGroup relationship inserted in SDGDB.");
-                                    }
-                                }
-                            }
-                        }
-
-                        transaction1.Commit();
-                        transaction2.Commit();
-
-                        LogMessage(
-                            $"\nUser: {user.Name} Inserted Successfully.\n--------------------------------------");
-                    }
-                    catch (Exception ex)
-                    {
-                        LogMessage($"Error processing Excel row {user.ExcelRow}: {ex.Message}");
-                        LogMessage(
-                            $"Rolling back the current {user.ExcelRow}st Excel row and skipping to the next...");
-
-                        transaction1.Rollback();
-                        transaction2.Rollback();
-
-                        if (ex is NpgsqlException)
-                        {
-                            LogMessage("Database connection error. Stopping processing.");
-                            break;
+                            logger.Error("Row {Row} ({Email}): {Error}", 
+                                error.ExcelRow, error.Email, error.ErrorMessage);
                         }
                     }
                 }
             }
+            else
+            {
+                logger.Information("Processing all users at once");
+                
+                var users = await excelReader.ReadUsersFromExcelAsync(appConfig.ExcelPath);
+                
+                if (!users.Any())
+                {
+                    logger.Warning("No valid users found in Excel file");
+                    return;
+                }
+
+                var result = await userProcessor.ProcessUsersAsync(users);
+                
+                totalProcessed = result.TotalRecords;
+                totalSuccess = result.SuccessfulRecords;
+                totalDuplicates = result.DuplicateRecords;
+                totalFailed = result.FailedRecords;
+
+                if (result.Errors.Any())
+                {
+                    foreach (var error in result.Errors)
+                    {
+                        logger.Error("Row {Row} ({Email}): {Error}", 
+                            error.ExcelRow, error.Email, error.ErrorMessage);
+                    }
+                }
+            }
+
+            overallStopwatch.Stop();
+
+            // Log summary
+            logger.Information("=== Processing Summary ===");
+            logger.Information("Total Processing Time: {Duration}", overallStopwatch.Elapsed);
+            logger.Information("Total Records Processed: {Total}", totalProcessed);
+            logger.Information("Successful: {Success} ({SuccessRate:P2})", 
+                totalSuccess, totalProcessed > 0 ? (double)totalSuccess / totalProcessed : 0);
+            logger.Information("Duplicates: {Duplicates}", totalDuplicates);
+            logger.Information("Failed: {Failed}", totalFailed);
+            logger.Information("Duplicate file: {Path}", await duplicateHandler.GetDuplicateFilePath());
         }
-
-        LogMessage("\nProcessing complete.");
+        catch (OperationCanceledException)
+        {
+            logger.Warning("Operation was cancelled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.Error(ex, "Unexpected error during processing");
+            throw;
+        }
     }
 
-    private static string? _logFilePath;
-
-    private static void ConfigureLogFile(string logFilePath)
+    private static string GetProjectRoot()
     {
-        if (string.IsNullOrWhiteSpace(logFilePath))
-            throw new ArgumentException("Log file path cannot be empty", nameof(logFilePath));
-
-        var logDir = Path.GetDirectoryName(logFilePath);
-        if (!string.IsNullOrWhiteSpace(logDir))
-            Directory.CreateDirectory(logDir);
-
-        _logFilePath = logFilePath;
-        File.Create(logFilePath).Dispose();
-    }
-    private static void LogMessage(string message, bool includeTimestamp = true)
-    {
-        if (string.IsNullOrWhiteSpace(_logFilePath))
-            throw new InvalidOperationException("Log file path not configured. Call ConfigureLogFile first.");
-
-        string formattedMessage = includeTimestamp
-            ? $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}"
-            : message;
-
-        Console.WriteLine(formattedMessage);
-        File.AppendAllText(_logFilePath, formattedMessage + Environment.NewLine);
+        var basePath = AppContext.BaseDirectory;
+        return Path.GetFullPath(Path.Combine(basePath, @"..\..\.."));
     }
 }
