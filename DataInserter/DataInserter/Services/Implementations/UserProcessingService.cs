@@ -64,16 +64,7 @@ public class UserProcessingService : IUserProcessingService
         await PreloadCachesAsync(cancellationToken);
         _logger.Information("Connected to both databases.\n");
         
-        // Get default agency ID once
-        var defaultAgencyId = await _sdgRepository.GetDefaultAgencyIdAsync(cancellationToken);
-        if (!defaultAgencyId.HasValue)
-        {
-            _logger.Warning("No default agency found in the system");
-        }
-        else
-        {
-            _logger.Information("Using default agency ID: {AgencyId}", defaultAgencyId.Value);
-        }
+        // No need for default agency ID as we'll use agencies from Excel
 
         // Check for existing users in batch
         var emails = users.Select(u => u.Email).Distinct().ToList();
@@ -106,7 +97,7 @@ public class UserProcessingService : IUserProcessingService
                     continue;
                 }
 
-                await ProcessSingleUserAsync(user, defaultAgencyId, cancellationToken);
+                await ProcessSingleUserAsync(user, cancellationToken);
                 result.SuccessfulRecords++;
                 
                 _logger.Information("\nUser: {Name} Inserted Successfully.\n--------------------------------------", user.Name);
@@ -145,7 +136,7 @@ public class UserProcessingService : IUserProcessingService
         return await ProcessUsersAsync(users, cancellationToken);
     }
 
-    private async Task ProcessSingleUserAsync(ExcelUser user, int? defaultAgencyId, CancellationToken cancellationToken)
+    private async Task ProcessSingleUserAsync(ExcelUser user, CancellationToken cancellationToken)
     {
         await _retryPolicy.ExecuteAsync(async () =>
         {
@@ -170,15 +161,11 @@ public class UserProcessingService : IUserProcessingService
                 }
             }
 
-            // Step 4: Get or create role
-            var roleId = await _sdgRepository.GetOrCreateRoleAsync(user.Role, cancellationToken);
+            // Step 4: Get or create agency
+            var agencyId = await _sdgRepository.GetOrCreateAgencyAsync(user.Agency, cancellationToken);
 
             // Step 5: Get or create user group
             var userGroupId = await _sdgRepository.GetOrCreateUserGroupAsync(user.UserGroup, cancellationToken);
-
-            // Create role-usergroup relationship
-            await _sdgRepository.CreateRoleUserGroupRelationshipAsync(roleId, userGroupId, cancellationToken);
-            _logger.Information("Role-UserGroup relationship inserted in SDGDB.");
 
             // Step 6: Create user in SDG database
             var sdgUserId = await _sdgRepository.UpsertUserAsync(aspNetUserId, user, cancellationToken);
@@ -188,11 +175,8 @@ public class UserProcessingService : IUserProcessingService
             await _sdgRepository.CreateUserDivisionRelationshipAsync(sdgUserId, divisionId, cancellationToken);
             _logger.Information("User-Division relationship inserted in SDGDB.");
 
-            if (defaultAgencyId.HasValue)
-            {
-                await _sdgRepository.CreateUserAgencyRelationshipAsync(sdgUserId, defaultAgencyId.Value, cancellationToken);
-                _logger.Information("User-Agency relationship inserted in SDGDB.");
-            }
+            await _sdgRepository.CreateUserAgencyRelationshipAsync(sdgUserId, agencyId, cancellationToken);
+            _logger.Information("User-Agency relationship inserted in SDGDB.");
 
             if (sectionId.HasValue)
             {
@@ -217,8 +201,8 @@ public class UserProcessingService : IUserProcessingService
         {
             _sdgRepository.GetExistingDivisionsAsync(cancellationToken),
             _sdgRepository.GetExistingSectionsAsync(cancellationToken),
-            _sdgRepository.GetExistingRolesAsync(cancellationToken),
-            _sdgRepository.GetExistingUserGroupsAsync(cancellationToken)
+            _sdgRepository.GetExistingUserGroupsAsync(cancellationToken),
+            _sdgRepository.GetExistingAgenciesAsync(cancellationToken)
         };
 
         await Task.WhenAll(tasks);

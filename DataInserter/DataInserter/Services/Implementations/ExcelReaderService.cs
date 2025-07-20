@@ -135,10 +135,10 @@ public class ExcelReaderService : IExcelReaderService
                 ExcelRow = row.Cell(1).TryGetValue<int>(out var rowNum) ? rowNum : dataRowNumber,
                 Name = row.Cell(2).GetString().Trim(),
                 Email = row.Cell(3).GetString().Trim(),
-                Role = row.Cell(5).GetString().Trim(),
-                UserGroup = row.Cell(6).GetString().Trim(),
-                Section = row.Cell(7).GetString().Trim(),
-                Division = row.Cell(8).GetString().Trim(),
+                UserGroup = row.Cell(5).GetString().Trim(),
+                Agency = row.Cell(6).GetString().Trim(),
+                Division = row.Cell(7).GetString().Trim(),
+                Section = row.Cell(8).GetString().Trim(),
                 ControlLevel = RoleMapper.ParseControlLevel("SECTION") // Default to SECTION
             };
 

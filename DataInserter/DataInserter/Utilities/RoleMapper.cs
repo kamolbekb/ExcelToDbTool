@@ -6,30 +6,31 @@ namespace DataInserter.Utilities;
 
 public static class RoleMapper
 {
-    public static string MapRole(string inputRole)
-    {
-        if (string.IsNullOrWhiteSpace(inputRole))
-            return inputRole;
-
-        var normalizedRole = inputRole.Trim();
-
-        // Find matching template
-        var matchedRole = ApplicationConstants.RoleTemplates.Templates
-            .FirstOrDefault(template =>
-            {
-                var lastWord = template.Split(' ').Last();
-                return Regex.IsMatch(normalizedRole, $@"\b{lastWord}\b", RegexOptions.IgnoreCase);
-            }) ?? normalizedRole;
-
-        // Append number suffix if exists
-        var numberSuffix = StringNormalizer.ExtractNumberSuffix(normalizedRole);
-        if (!string.IsNullOrEmpty(numberSuffix))
-        {
-            matchedRole += " " + numberSuffix;
-        }
-
-        return matchedRole;
-    }
+    // Commented out as roles are no longer used in the new structure
+    // public static string MapRole(string inputRole)
+    // {
+    //     if (string.IsNullOrWhiteSpace(inputRole))
+    //         return inputRole;
+    //
+    //     var normalizedRole = inputRole.Trim();
+    //
+    //     // Find matching template
+    //     var matchedRole = ApplicationConstants.RoleTemplates.Templates
+    //         .FirstOrDefault(template =>
+    //         {
+    //             var lastWord = template.Split(' ').Last();
+    //             return Regex.IsMatch(normalizedRole, $@"\b{lastWord}\b", RegexOptions.IgnoreCase);
+    //         }) ?? normalizedRole;
+    //
+    //     // Append number suffix if exists
+    //     var numberSuffix = StringNormalizer.ExtractNumberSuffix(normalizedRole);
+    //     if (!string.IsNullOrEmpty(numberSuffix))
+    //     {
+    //         matchedRole += " " + numberSuffix;
+    //     }
+    //
+    //     return matchedRole;
+    // }
 
     public static string MapUserGroup(string inputUserGroup)
     {

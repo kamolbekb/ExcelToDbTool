@@ -24,15 +24,16 @@ public static class ApplicationConstants
         public const int Default = 1;
     }
 
-    public static class RoleTemplates
-    {
-        public static readonly List<string> Templates = new()
-        {
-            "Data Provider",
-            "Data Approver",
-            "Administrator"
-        };
-    }
+    // Commented out as roles are no longer used in the new structure
+    // public static class RoleTemplates
+    // {
+    //     public static readonly List<string> Templates = new()
+    //     {
+    //         "Data Provider",
+    //         "Data Approver",
+    //         "Administrator"
+    //     };
+    // }
 
     public static class UserGroupTemplates
     {

@@ -16,10 +16,11 @@ public class SdgRepository : ISdgRepository
     private readonly Dictionary<string, int> _sectionCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _roleCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _userGroupCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _agencyCache = new(StringComparer.OrdinalIgnoreCase);
 
     public SdgRepository(IConfiguration configuration, ILogger logger)
     {
-        _connectionString = configuration.GetConnectionString("SDGConnection") 
+        _connectionString = configuration.GetConnectionString("SDGConnection")
             ?? throw new ArgumentException("SDGConnection not found in configuration");
         _logger = logger.ForContext<SdgRepository>();
     }
@@ -55,14 +56,14 @@ public class SdgRepository : ISdgRepository
         var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
         _divisionCache[divisionName] = newId;
         _logger.Information("Division inserted in SDGDB.");
-        
+
         return newId;
     }
 
     public async Task<Dictionary<string, int>> GetExistingDivisionsAsync(CancellationToken cancellationToken = default)
     {
         const string query = "SELECT \"Id\", \"Name\" FROM \"Divisions\"";
-        
+
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
@@ -117,14 +118,14 @@ public class SdgRepository : ISdgRepository
         var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
         _sectionCache[sectionName] = newId;
         _logger.Information("Section inserted in SDGDB.");
-        
+
         return newId;
     }
 
     public async Task<Dictionary<string, int>> GetExistingSectionsAsync(CancellationToken cancellationToken = default)
     {
         const string query = "SELECT \"Id\", \"Name\" FROM \"Sections\"";
-        
+
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
@@ -147,68 +148,68 @@ public class SdgRepository : ISdgRepository
 
     #region Role Operations
 
-    public async Task<int> GetOrCreateRoleAsync(string roleName, CancellationToken cancellationToken = default)
-    {
-        var mappedRoleName = RoleMapper.MapRole(roleName);
-        
-        if (_roleCache.TryGetValue(mappedRoleName, out var cachedId))
-            return cachedId;
+    //public async Task<int> GetOrCreateRoleAsync(string roleName, CancellationToken cancellationToken = default)
+    //{
+    //    var mappedRoleName = RoleMapper.MapRole(roleName);
 
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+    //    if (_roleCache.TryGetValue(mappedRoleName, out var cachedId))
+    //        return cachedId;
 
-        // Check if exists
-        const string checkQuery = "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\" = @Name";
-        await using var checkCommand = new NpgsqlCommand(checkQuery, connection);
-        checkCommand.Parameters.AddWithValue("@Name", mappedRoleName);
+    //    await using var connection = new NpgsqlConnection(_connectionString);
+    //    await connection.OpenAsync(cancellationToken);
 
-        var result = await checkCommand.ExecuteScalarAsync(cancellationToken);
-        if (result != null)
-        {
-            var id = Convert.ToInt32(result);
-            _roleCache[mappedRoleName] = id;
-            return id;
-        }
+    //    // Check if exists
+    //    const string checkQuery = "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\" = @Name";
+    //    await using var checkCommand = new NpgsqlCommand(checkQuery, connection);
+    //    checkCommand.Parameters.AddWithValue("@Name", mappedRoleName);
 
-        // Insert new
-        const string insertQuery = @"
-            INSERT INTO ""Roles"" (""Name"", ""Enabled"", ""ApplicationId"") 
-            VALUES (@Name, @Enabled, @ApplicationId) 
-            RETURNING ""Id""";
-            
-        await using var insertCommand = new NpgsqlCommand(insertQuery, connection);
-        insertCommand.Parameters.AddWithValue("@Name", mappedRoleName);
-        insertCommand.Parameters.AddWithValue("@Enabled", true);
-        insertCommand.Parameters.AddWithValue("@ApplicationId", ApplicationConstants.ApplicationId.Default);
+    //    var result = await checkCommand.ExecuteScalarAsync(cancellationToken);
+    //    if (result != null)
+    //    {
+    //        var id = Convert.ToInt32(result);
+    //        _roleCache[mappedRoleName] = id;
+    //        return id;
+    //    }
 
-        var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
-        _roleCache[mappedRoleName] = newId;
-        _logger.Information("Role '{RoleName}' inserted in SDGDB.", mappedRoleName);
-        
-        return newId;
-    }
+    //    // Insert new
+    //    const string insertQuery = @"
+    //        INSERT INTO ""Roles"" (""Name"", ""Enabled"", ""ApplicationId"") 
+    //        VALUES (@Name, @Enabled, @ApplicationId) 
+    //        RETURNING ""Id""";
 
-    public async Task<Dictionary<string, int>> GetExistingRolesAsync(CancellationToken cancellationToken = default)
-    {
-        const string query = "SELECT \"Id\", \"Name\" FROM \"Roles\"";
-        
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+    //    await using var insertCommand = new NpgsqlCommand(insertQuery, connection);
+    //    insertCommand.Parameters.AddWithValue("@Name", mappedRoleName);
+    //    insertCommand.Parameters.AddWithValue("@Enabled", true);
+    //    insertCommand.Parameters.AddWithValue("@ApplicationId", ApplicationConstants.ApplicationId.Default);
 
-        await using var command = new NpgsqlCommand(query, connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    //    var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
+    //    _roleCache[mappedRoleName] = newId;
+    //    _logger.Information("Role '{RoleName}' inserted in SDGDB.", mappedRoleName);
 
-        var roles = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            var id = reader.GetInt32(0);
-            var name = reader.GetString(1).Trim();
-            roles[name] = id;
-            _roleCache[name] = id; // Update cache
-        }
+    //    return newId;
+    //}
 
-        return roles;
-    }
+    //public async Task<Dictionary<string, int>> GetExistingRolesAsync(CancellationToken cancellationToken = default)
+    //{
+    //    const string query = "SELECT \"Id\", \"Name\" FROM \"Roles\"";
+
+    //    await using var connection = new NpgsqlConnection(_connectionString);
+    //    await connection.OpenAsync(cancellationToken);
+
+    //    await using var command = new NpgsqlCommand(query, connection);
+    //    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+    //    var roles = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    //    while (await reader.ReadAsync(cancellationToken))
+    //    {
+    //        var id = reader.GetInt32(0);
+    //        var name = reader.GetString(1).Trim();
+    //        roles[name] = id;
+    //        _roleCache[name] = id; // Update cache
+    //    }
+
+    //    return roles;
+    //}
 
     #endregion
 
@@ -217,7 +218,7 @@ public class SdgRepository : ISdgRepository
     public async Task<int> GetOrCreateUserGroupAsync(string userGroupName, CancellationToken cancellationToken = default)
     {
         var mappedUserGroupName = RoleMapper.MapUserGroup(userGroupName);
-        
+
         if (_userGroupCache.TryGetValue(mappedUserGroupName, out var cachedId))
             return cachedId;
 
@@ -245,14 +246,14 @@ public class SdgRepository : ISdgRepository
         var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
         _userGroupCache[mappedUserGroupName] = newId;
         _logger.Information("UserGroup '{UserGroupName}' inserted in SDGDB.", mappedUserGroupName);
-        
+
         return newId;
     }
 
     public async Task<Dictionary<string, int>> GetExistingUserGroupsAsync(CancellationToken cancellationToken = default)
     {
         const string query = "SELECT \"Id\", \"Name\" FROM \"UserGroups\"";
-        
+
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
@@ -292,15 +293,15 @@ public class SdgRepository : ISdgRepository
         await connection.OpenAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(query, connection);
-        
+
         var isApiAdmin = excelUser.Division.Equals(ApplicationConstants.SpecialDivisions.Administrator, StringComparison.OrdinalIgnoreCase) ||
                         excelUser.Division.Equals(ApplicationConstants.SpecialDivisions.All, StringComparison.OrdinalIgnoreCase);
-        
+
         command.Parameters.AddWithValue("@Sub", aspNetUserId);
         command.Parameters.AddWithValue("@IsApiAdmin", isApiAdmin);
         command.Parameters.AddWithValue("@ControlLevel", (int)excelUser.ControlLevel);
         command.Parameters.AddWithValue("@IsTerminated", false);
-        command.Parameters.AddWithValue("@ActorLevel", ApplicationConstants.ActorLevel.Default);
+        command.Parameters.AddWithValue("@ActorLevel", excelUser.GetActorLevel());
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt32(result!);
@@ -310,16 +311,71 @@ public class SdgRepository : ISdgRepository
 
     #region Agency Operations
 
+    public async Task<int> GetOrCreateAgencyAsync(string agencyName, CancellationToken cancellationToken = default)
+    {
+        if (_agencyCache.TryGetValue(agencyName, out var cachedId))
+            return cachedId;
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        // Check if exists
+        const string checkQuery = "SELECT \"Id\" FROM \"Agencies\" WHERE \"Name\" = @Name";
+        await using var checkCommand = new NpgsqlCommand(checkQuery, connection);
+        checkCommand.Parameters.AddWithValue("@Name", agencyName);
+
+        var result = await checkCommand.ExecuteScalarAsync(cancellationToken);
+        if (result != null)
+        {
+            var id = Convert.ToInt32(result);
+            _agencyCache[agencyName] = id;
+            return id;
+        }
+
+        // Insert new
+        const string insertQuery = "INSERT INTO \"Agencies\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
+        await using var insertCommand = new NpgsqlCommand(insertQuery, connection);
+        insertCommand.Parameters.AddWithValue("@Name", agencyName);
+
+        var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
+        _agencyCache[agencyName] = newId;
+        _logger.Information("Agency '{AgencyName}' inserted in SDGDB.", agencyName);
+
+        return newId;
+    }
+
+    public async Task<Dictionary<string, int>> GetExistingAgenciesAsync(CancellationToken cancellationToken = default)
+    {
+        const string query = "SELECT \"Id\", \"Name\" FROM \"Agencies\"";
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(query, connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var agencies = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var id = reader.GetInt32(0);
+            var name = reader.GetString(1);
+            agencies[name] = id;
+            _agencyCache[name] = id; // Update cache
+        }
+
+        return agencies;
+    }
+
     public async Task<int?> GetDefaultAgencyIdAsync(CancellationToken cancellationToken = default)
     {
         const string query = "SELECT \"Id\" FROM \"Agencies\" ORDER BY \"Id\" LIMIT 1";
-        
+
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(query, connection);
         var result = await command.ExecuteScalarAsync(cancellationToken);
-        
+
         return result != null ? Convert.ToInt32(result) : null;
     }
 
@@ -385,7 +441,7 @@ public class SdgRepository : ISdgRepository
         var checkQuery = $@"
             SELECT COUNT(*) FROM ""{tableName}"" 
             WHERE ""{column1Name}"" = @Value1 AND ""{column2Name}"" = @Value2";
-            
+
         await using var checkCommand = new NpgsqlCommand(checkQuery, connection);
         checkCommand.Parameters.AddWithValue("@Value1", column1Value);
         checkCommand.Parameters.AddWithValue("@Value2", column2Value);
@@ -398,7 +454,7 @@ public class SdgRepository : ISdgRepository
         var insertQuery = $@"
             INSERT INTO ""{tableName}"" (""{column1Name}"", ""{column2Name}"") 
             VALUES (@Value1, @Value2)";
-            
+
         await using var insertCommand = new NpgsqlCommand(insertQuery, connection);
         insertCommand.Parameters.AddWithValue("@Value1", column1Value);
         insertCommand.Parameters.AddWithValue("@Value2", column2Value);
