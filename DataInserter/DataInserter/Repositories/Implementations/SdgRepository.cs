@@ -222,32 +222,39 @@ public class SdgRepository : ISdgRepository
         if (_userGroupCache.TryGetValue(mappedUserGroupName, out var cachedId))
             return cachedId;
 
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-
-        // Check if exists
-        const string checkQuery = "SELECT \"Id\" FROM \"UserGroups\" WHERE \"Name\" = @Name";
-        await using var checkCommand = new NpgsqlCommand(checkQuery, connection);
-        checkCommand.Parameters.AddWithValue("@Name", mappedUserGroupName);
-
-        var result = await checkCommand.ExecuteScalarAsync(cancellationToken);
-        if (result != null)
+        if (mappedUserGroupName.Contains("APPROVAL"))
         {
-            var id = Convert.ToInt32(result);
-            _userGroupCache[mappedUserGroupName] = id;
-            return id;
+            _userGroupCache[mappedUserGroupName] = 2;
+            return 2; // Special case for APPROVAL user groups
         }
 
+        _userGroupCache[mappedUserGroupName] = 4;
+        return 4; // Default to 4 for other user groups
+        // Default to 1 if not found
+        //await using var connection = new NpgsqlConnection(_connectionString);
+        //await connection.OpenAsync(cancellationToken);
+
+        // Check if exists
+        //const string checkQuery = "SELECT \"Id\" FROM \"UserGroups\" WHERE \"Name\" = @Name";
+        //await using var checkCommand = new NpgsqlCommand(checkQuery, connection);
+        //checkCommand.Parameters.AddWithValue("@Name", mappedUserGroupName);
+
+        //var result = await checkCommand.ExecuteScalarAsync(cancellationToken);
+        //if (result != null)
+        //{
+        //    var id = Convert.ToInt32(result);
+        //    _userGroupCache[mappedUserGroupName] = id;
+        //    return id;
+        //}
+
         // Insert new
-        const string insertQuery = "INSERT INTO \"UserGroups\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
-        await using var insertCommand = new NpgsqlCommand(insertQuery, connection);
-        insertCommand.Parameters.AddWithValue("@Name", mappedUserGroupName);
+        //const string insertQuery = "INSERT INTO \"UserGroups\" (\"Name\") VALUES (@Name) RETURNING \"Id\"";
+        //await using var insertCommand = new NpgsqlCommand(insertQuery, connection);
+        //insertCommand.Parameters.AddWithValue("@Name", mappedUserGroupName);
 
-        var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
-        _userGroupCache[mappedUserGroupName] = newId;
-        _logger.Information("UserGroup '{UserGroupName}' inserted in SDGDB.", mappedUserGroupName);
-
-        return newId;
+        //var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync(cancellationToken));
+        //_userGroupCache[mappedUserGroupName] = newId;
+        //_logger.Information("UserGroup '{UserGroupName}' inserted in SDGDB.", mappedUserGroupName);
     }
 
     public async Task<Dictionary<string, int>> GetExistingUserGroupsAsync(CancellationToken cancellationToken = default)

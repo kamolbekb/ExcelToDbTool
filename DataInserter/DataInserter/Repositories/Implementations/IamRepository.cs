@@ -71,12 +71,12 @@ public class IamRepository : IIamRepository
     {
         const string query = @"
             INSERT INTO ""AspNetUsers"" (
-                ""Id"", ""UserName"", ""NormalizedUserName"", ""Email"", ""NormalizedEmail"", 
+                ""Id"",""FullName"",""UserName"", ""NormalizedUserName"", ""Email"", ""NormalizedEmail"", 
                 ""PasswordHash"", ""SecurityStamp"", ""ConcurrencyStamp"", ""Status"", ""UserType"", 
                 ""EmailConfirmed"", ""PhoneNumberConfirmed"", ""TwoFactorEnabled"", ""LockoutEnabled"", 
                 ""AccessFailedCount"", ""IsFromActiveDirectory""
             ) VALUES (
-                @Id, @UserName, @NormalizedUserName, @Email, @NormalizedEmail, 
+                @Id, @UserName, @UserName, @NormalizedUserName, @Email, @NormalizedEmail, 
                 @PasswordHash, @SecurityStamp, @ConcurrencyStamp, @Status, @UserType, 
                 @EmailConfirmed, @PhoneNumberConfirmed, @TwoFactorEnabled, @LockoutEnabled, 
                 @AccessFailedCount, @IsFromActiveDirectory

@@ -59,7 +59,7 @@ public class ExcelReaderService : IExcelReaderService
         }
 
         var rowNumber = 0;
-        foreach (var row in rows.Skip(2)) // Skip header rows
+        foreach (var row in rows.Skip(1)) // Skip header rows
         {
             cancellationToken.ThrowIfCancellationRequested();
             rowNumber++;
